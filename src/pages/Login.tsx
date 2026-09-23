@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
-import { AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { useAuth } from '../auth/auth'
 import { supabase } from '../lib/supabase'
 import { emailForLogin } from '../lib/login'
@@ -15,6 +15,8 @@ const fieldBad = 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-re
 
 export default function Login() {
   const { session } = useAuth()
+  // Set by /confirm-email after a successful confirmation, so the thank-you carries over here.
+  const justConfirmed = Boolean((useLocation().state as { confirmed?: boolean } | null)?.confirmed)
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [identifierError, setIdentifierError] = useState<string | null>(null)
@@ -87,6 +89,12 @@ export default function Login() {
       }
     >
       <form onSubmit={submit} noValidate className="space-y-5">
+        {justConfirmed && !formError && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+            <CheckCircle2 aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>Thank you for confirming your email. Sign in to get started.</p>
+          </div>
+        )}
         {formError && (
           <div
             role="alert"

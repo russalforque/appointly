@@ -43,7 +43,7 @@ export default function Register() {
         // Built from the current origin so the same build works on a preview deployment and on
         // the production domain. Every origin used here must be listed under Supabase
         // Auth -> URL Configuration -> Redirect URLs, or the link lands on the Site URL instead.
-        emailRedirectTo: `${window.location.origin}/login`,
+        emailRedirectTo: `${window.location.origin}/confirm-email`,
       },
     })
     setBusy(false)
@@ -71,7 +71,7 @@ export default function Register() {
           </div>
           <p className="mt-3 text-sm text-slate-600">
             We sent a confirmation link to <span className="font-medium text-slate-900">{sent}</span>.
-            Click it to activate your account, then sign in.
+            Click it to activate your account — we'll bring you back here to sign in.
           </p>
         </div>
       </AuthLayout>
