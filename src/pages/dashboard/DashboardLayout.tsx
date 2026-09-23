@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   Building2,
@@ -24,67 +24,19 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../auth/auth'
 import { supabase } from '../../lib/supabase'
-import { friendlyError, slugify, unwrap } from '../../lib/db'
+import { unwrap } from '../../lib/db'
 import { initials } from '../../lib/format'
 import { billingStatusLabel, fetchPlans, fetchSubscription, hasBillingAccess, hasCapability } from '../../lib/billing'
 import { isPlatformAdmin } from '../../lib/admin'
 import { useLoad } from '../../lib/useLoad'
-import { btn, card, input } from '../../lib/ui'
 import type { Business, Subscription } from '../../lib/types'
-import Field from '../../components/Field'
-import Select from '../../components/Select'
 import { Bone, ErrorText } from '../../components/Status'
 import NotificationBell from '../../components/NotificationBell'
 import Logo from '../../components/Logo'
 import type { PlanAccess } from './useBusiness'
+import CreateBusiness from './CreateBusiness'
 
-const CATEGORIES = ['Salon', 'Barbershop', 'Spa', 'Massage', 'Dental clinic', 'Car detailing', 'Cleaning', 'Pet grooming', 'Repair', 'Other']
 const SIDEBAR_COLLAPSED_KEY = 'appointly:sidebar-collapsed'
-
-function CreateBusiness({ onCreated }: { onCreated: () => void }) {
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  async function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const f = new FormData(e.currentTarget)
-    const name = String(f.get('name')).trim()
-    setBusy(true)
-    const { error } = await supabase.rpc('create_business', {
-      p_name: name,
-      p_slug: String(f.get('slug')).trim() || slugify(name),
-      p_category: String(f.get('category')),
-    })
-    setBusy(false)
-    if (error) setError(error.code === '23505' ? 'That URL name is already taken.' : friendlyError(error.message))
-    else onCreated()
-  }
-
-  return (
-    <main className="grid min-h-screen place-items-center bg-neutral-50 px-4">
-      <form onSubmit={submit} className={`${card} w-full max-w-md space-y-4`}>
-        <h1 className="text-xl font-semibold">Set up your business</h1>
-        <Field label="Business name">
-          <input name="name" required className={input} />
-        </Field>
-        <Field label="Booking page URL name (e.g. my-salon)">
-          <input name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="auto from name" className={input} />
-        </Field>
-        <Field label="Category">
-          <Select name="category" className={input}>
-            {CATEGORIES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
-        </Field>
-        <ErrorText message={error} />
-        <button className={btn} disabled={busy}>
-          Create business
-        </button>
-      </form>
-    </main>
-  )
-}
 
 function DashboardShellSkeleton() {
   return (
