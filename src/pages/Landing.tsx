@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useId, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   CalendarDays,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { fetchPlans, fmtMoney } from '../lib/billing'
 import { useLoad } from '../lib/useLoad'
+import { usePageMeta } from '../lib/usePageMeta'
 import Logo from '../components/Logo'
 import Reveal from '../components/Reveal'
 import DashboardPreview from '../assets/dashboardpage-lgo.png'
@@ -70,12 +71,14 @@ const STEPS = [
 ]
 
 const FAQS = [
-  { q: 'Is there a free trial?', a: 'Yes. Every new business gets a 14-day free trial with full access.' },
-  { q: 'Do I need a card to sign up?', a: 'No. No card is required to create an account — payment only happens if you choose to upgrade.' },
-  { q: 'How does online booking work?', a: 'You get a public booking page listing your services and staff. Customers pick a service, staff member, and time, and it lands directly on your calendar.' },
-  { q: 'Can customers book from their phones?', a: 'Yes. Your booking page and your dashboard both work on any device.' },
-  { q: 'Can I manage multiple staff?', a: 'Yes. Add as many staff members as you need, each with their own services and schedule.' },
-  { q: 'How are payments handled?', a: 'Subscription payments are processed securely through Xendit, supporting card, GCash, Maya, GrabPay, and QR Ph.' },
+  { q: 'Is there a free trial?', a: 'Yes. Every new business gets a 14-day free trial with full access to the product. No card is required to start.' },
+  { q: 'What happens when the trial ends?', a: 'Your data stays exactly where it is. You pick a plan and pay for it to keep using the dashboard and your booking page.' },
+  { q: 'How does online booking work?', a: 'You get a public booking page listing your services and staff. Customers pick a service, a staff member, and a time that is genuinely free, and it lands directly on your calendar.' },
+  { q: 'Can customers book from their phones?', a: 'Yes. Your booking page and your dashboard both work on any device, with no app to install.' },
+  { q: 'Can I manage multiple staff?', a: 'Yes. Add as many staff members as you need, each with their own services and schedule, all on one shared calendar.' },
+  { q: 'How do I pay for a plan?', a: 'Transfer the plan amount to our GoTyme Bank account — by bank transfer or by scanning the QR Ph code — then upload your receipt and the reference number from your bank app.' },
+  { q: 'How long before my plan is active?', a: 'Our team checks every transfer by hand, so activation is not instant. You can follow the status on your billing page, and we notify you in the dashboard the moment the plan is live.' },
+  { q: 'Does my subscription renew automatically?', a: 'No. Each plan is prepaid for a single billing period and never renews on its own, so nothing is charged without you choosing to pay again. Once a period is activated it is non-refundable.' },
 ]
 
 const NAV_LINKS = [
@@ -117,22 +120,14 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 }
 
 export default function Landing() {
-  const { data: plans } = useLoad(useCallback(fetchPlans, []))
+  const { data: plans } = useLoad(useCallback(() => fetchPlans(), []))
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  useEffect(() => {
-    document.title = 'Appointly — Online Booking & Scheduling for Service Businesses'
-    const meta = document.querySelector('meta[name="description"]') ?? (() => {
-      const el = document.createElement('meta')
-      el.setAttribute('name', 'description')
-      document.head.appendChild(el)
-      return el
-    })()
-    meta.setAttribute(
-      'content',
+  usePageMeta({
+    title: 'Appointly — Online Booking & Scheduling for Service Businesses',
+    description:
       'An online booking platform for service businesses to manage appointments, services, staff, schedules, and customers in one place.',
-    )
-  }, [])
+  })
 
   const popularPlanId = plans && plans.length > 1 ? plans[1].id : null
 
@@ -254,6 +249,10 @@ export default function Landing() {
                 alt="The Appointly dashboard, showing upcoming appointments and the booking calendar"
                 width={1672}
                 height={940}
+                // Below the fold and the single heaviest asset on the page, so it must not
+                // compete with the hero for bandwidth.
+                loading="lazy"
+                decoding="async"
                 className="block h-auto w-full max-w-full"
               />
             </figure>
@@ -401,7 +400,8 @@ export default function Landing() {
             )}
 
             <p className="mx-auto mt-8 max-w-lg text-center text-xs leading-relaxed text-slate-500">
-              Paid subscriptions are processed securely through Xendit — supporting card, GCash, Maya, GrabPay, and QR Ph.
+              Paid plans are settled by GoTyme Bank transfer or QR Ph. You upload your receipt, our team verifies it, and your
+              plan is activated — prepaid for one period, with no automatic renewal.
             </p>
           </div>
         </section>
@@ -460,6 +460,12 @@ export default function Landing() {
                 {l.label}
               </a>
             ))}
+            <Link to="/terms" className={`rounded px-2.5 py-2.5 transition-colors hover:text-slate-900 ${FOCUS}`}>
+              Terms
+            </Link>
+            <Link to="/privacy" className={`rounded px-2.5 py-2.5 transition-colors hover:text-slate-900 ${FOCUS}`}>
+              Privacy
+            </Link>
             <Link to="/login" className={`rounded px-2.5 py-2.5 transition-colors hover:text-slate-900 ${FOCUS}`}>
               Log in
             </Link>

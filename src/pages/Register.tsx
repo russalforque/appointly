@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { Eye, EyeOff, Loader2, MailCheck } from 'lucide-react'
 import { useAuth } from '../auth/auth'
 import { supabase } from '../lib/supabase'
 import { formStr } from '../lib/db'
+import { authErrorMessage } from '../lib/authErrors'
 import { btn, input } from '../lib/ui'
 import Field from '../components/Field'
 import { ErrorText } from '../components/Status'
 import AuthLayout from '../components/AuthLayout'
+import HomeRedirect from '../components/HomeRedirect'
+import { LEGAL_UPDATED } from './legal/LegalLayout'
 
 export default function Register() {
   const { session } = useAuth()
@@ -15,23 +18,36 @@ export default function Register() {
   const [busy, setBusy] = useState(false)
   const [sent, setSent] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
+  const [accepted, setAccepted] = useState(false)
 
-  if (session) return <Navigate to="/dashboard" replace />
+  // Resolves per account: an Appointly staff account belongs in /admin, not the dashboard.
+  if (session) return <HomeRedirect />
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
     const email = String(f.get('email'))
     const password = String(f.get('password'))
+    if (!accepted) {
+      setError('Please accept the Terms of Service and Privacy Policy to continue.')
+      return
+    }
     setBusy(true)
     setError(null)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: formStr(f, 'name') } },
+      // Stamped so we can show when — and to which version — this account agreed.
+      options: {
+        data: { full_name: formStr(f, 'name'), terms_accepted_at: new Date().toISOString(), terms_version: LEGAL_UPDATED },
+        // Built from the current origin so the same build works on a preview deployment and on
+        // the production domain. Every origin used here must be listed under Supabase
+        // Auth -> URL Configuration -> Redirect URLs, or the link lands on the Site URL instead.
+        emailRedirectTo: `${window.location.origin}/login`,
+      },
     })
     setBusy(false)
-    if (error) setError(error.message)
+    if (error) setError(authErrorMessage(error.message, 'signup'))
     else if (!data.session) setSent(email)
   }
 
@@ -103,14 +119,34 @@ export default function Register() {
             </button>
           </div>
         </Field>
+        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+          <input
+            type="checkbox"
+            name="accept_terms"
+            checked={accepted}
+            onChange={(e) => setAccepted(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600"
+          />
+          <span className="text-xs leading-relaxed text-slate-600">
+            I have read and agree to Appointly&apos;s{' '}
+            <Link to="/terms" target="_blank" className="font-medium text-brand-600 hover:text-brand-700">
+              Terms of Service
+            </Link>{' '}
+            and{' '}
+            <Link to="/privacy" target="_blank" className="font-medium text-brand-600 hover:text-brand-700">
+              Privacy Policy
+            </Link>
+            .
+          </span>
+        </label>
         <ErrorText message={error} />
-        <button className={`${btn} flex w-full items-center justify-center gap-2 py-2.5`} disabled={busy}>
+        <button
+          className={`${btn} flex w-full items-center justify-center gap-2 py-2.5`}
+          disabled={busy || !accepted}
+        >
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
           Create account
         </button>
-        <p className="text-center text-xs leading-relaxed text-slate-400">
-          By creating an account, you agree to Appointly's Terms of Service and Privacy Policy.
-        </p>
       </form>
     </AuthLayout>
   )

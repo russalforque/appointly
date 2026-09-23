@@ -16,6 +16,7 @@ import {
   Menu,
   Search,
   Settings2,
+  ShieldCheck,
   Users,
   UserRound,
   X,
@@ -25,7 +26,8 @@ import { useAuth } from '../../auth/auth'
 import { supabase } from '../../lib/supabase'
 import { friendlyError, slugify, unwrap } from '../../lib/db'
 import { initials } from '../../lib/format'
-import { billingStatusLabel, fetchPlans, fetchSubscription, hasBillingAccess } from '../../lib/billing'
+import { billingStatusLabel, fetchPlans, fetchSubscription, hasBillingAccess, hasCapability } from '../../lib/billing'
+import { isPlatformAdmin } from '../../lib/admin'
 import { useLoad } from '../../lib/useLoad'
 import { btn, card, input } from '../../lib/ui'
 import type { Business, Subscription } from '../../lib/types'
@@ -34,6 +36,7 @@ import Select from '../../components/Select'
 import { Bone, ErrorText } from '../../components/Status'
 import NotificationBell from '../../components/NotificationBell'
 import Logo from '../../components/Logo'
+import type { PlanAccess } from './useBusiness'
 
 const CATEGORIES = ['Salon', 'Barbershop', 'Spa', 'Massage', 'Dental clinic', 'Car detailing', 'Cleaning', 'Pet grooming', 'Repair', 'Other']
 const SIDEBAR_COLLAPSED_KEY = 'appointly:sidebar-collapsed'
@@ -197,6 +200,7 @@ function SidebarContent({
   business,
   billingLabel,
   locked,
+  isPlatformAdmin,
   collapsed,
   onNavigate,
   onSignOut,
@@ -206,6 +210,7 @@ function SidebarContent({
   business: Business
   billingLabel: string | null
   locked: boolean
+  isPlatformAdmin: boolean
   collapsed?: boolean
   onNavigate: () => void
   onSignOut: () => void
@@ -234,17 +239,21 @@ function SidebarContent({
   }, [profileOpen])
 
   const sections = useMemo(() => {
+    // Appointly staff get one extra section; it is only a shortcut, /admin guards itself.
+    const all = isPlatformAdmin
+      ? [...NAV_SECTIONS, { label: 'Appointly', items: [{ to: '/admin/payments', label: 'Admin payments', icon: ShieldCheck }] }]
+      : NAV_SECTIONS
     const base = locked
-      ? NAV_SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => i.to === '/dashboard/billing') })).filter(
+      ? all.map((s) => ({ ...s, items: s.items.filter((i) => i.to === '/dashboard/billing') })).filter(
           (s) => s.items.length,
         )
-      : NAV_SECTIONS
+      : all
     const q = query.trim().toLowerCase()
     if (!q) return base
     return base
       .map((s) => ({ ...s, items: s.items.filter((i) => i.label.toLowerCase().includes(q)) }))
       .filter((s) => s.items.length)
-  }, [locked, query])
+  }, [isPlatformAdmin, locked, query])
 
   return (
     <div className="flex h-full flex-col gap-4 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-4">
@@ -422,18 +431,40 @@ export default function DashboardLayout() {
     const m = await unwrap<{ business_id: string }[]>(
       supabase.from('business_members').select('business_id').eq('user_id', userId).limit(1),
     )
-    if (!m.length) return null
+    // A platform admin may have no business of their own; they belong in /admin, not in setup.
+    if (!m.length) return { business: null, platformAdmin: await isPlatformAdmin() }
     const id = m[0].business_id
-    const [business, settings, plans, subscription] = await Promise.all([
+    const [business, settings, plans, subscription, platformAdmin] = await Promise.all([
       unwrap<Business>(supabase.from('businesses').select('*').eq('id', id).single()),
       unwrap<{ timezone: string }>(supabase.from('business_settings').select('timezone').eq('business_id', id).single()),
       fetchPlans(),
       fetchSubscription(id),
+      isPlatformAdmin(),
     ])
-    return { business, timezone: settings.timezone, billingLabel: billingStatusLabel(subscription, plans), subscription }
+    return {
+      business,
+      timezone: settings.timezone,
+      billingLabel: billingStatusLabel(subscription, plans),
+      // Resolved once here so every page can gate on it without re-querying the plan.
+      can: {
+        notifications: hasCapability(subscription, plans, 'notifications'),
+        advancedBooking: hasCapability(subscription, plans, 'advanced_booking'),
+      },
+      subscription,
+      platformAdmin,
+    }
   }, [userId])
   const { data, loading, error, reload } = useLoad<
-    { business: Business; timezone: string; billingLabel: string; subscription: Subscription | null } | null
+    | { business: null; platformAdmin: boolean }
+    | {
+        business: Business
+        timezone: string
+        billingLabel: string
+        subscription: Subscription | null
+        can: PlanAccess
+        platformAdmin: boolean
+      }
+    | null
   >(load)
 
   if (authLoading) return <DashboardShellSkeleton />
@@ -441,7 +472,8 @@ export default function DashboardLayout() {
   if (loading) return <DashboardShellSkeleton />
   if (error) return <ErrorText message={error} />
   if (!data) return <CreateBusiness onCreated={reload} />
-  const { business, timezone, billingLabel, subscription } = data
+  if (!data.business) return data.platformAdmin ? <Navigate to="/admin" replace /> : <CreateBusiness onCreated={reload} />
+  const { business, timezone, billingLabel, subscription, can, platformAdmin } = data
   const locked = !hasBillingAccess(subscription)
   const userLabel = (session!.user.user_metadata?.full_name as string | undefined)?.trim() || session!.user.email || 'Account'
   const userEmail = session!.user.email ?? ''
@@ -462,6 +494,7 @@ export default function DashboardLayout() {
           business={business}
           billingLabel={billingLabel}
           locked={locked}
+          isPlatformAdmin={platformAdmin}
           collapsed={collapsed}
           onNavigate={() => {}}
           onSignOut={() => supabase.auth.signOut()}
@@ -488,7 +521,7 @@ export default function DashboardLayout() {
           <Menu size={20} />
         </button>
         <p className="flex-1 truncate text-sm font-semibold text-neutral-900">{business.name}</p>
-        <NotificationBell businessId={business.id} timezone={timezone} />
+        {can.notifications && <NotificationBell businessId={business.id} timezone={timezone} />}
       </header>
 
       {/* Mobile drawer */}
@@ -519,6 +552,7 @@ export default function DashboardLayout() {
             business={business}
             billingLabel={billingLabel}
             locked={locked}
+            isPlatformAdmin={platformAdmin}
             onNavigate={() => setMobileOpen(false)}
             onSignOut={() => supabase.auth.signOut()}
             userLabel={userLabel}
@@ -530,7 +564,7 @@ export default function DashboardLayout() {
       <main
         className={`min-w-0 p-4 transition-[margin] duration-200 sm:p-6 md:p-8 ${collapsed ? 'md:ml-18' : 'md:ml-64'}`}
       >
-        <Outlet context={{ business, timezone, reload }} />
+        <Outlet context={{ business, timezone, can, reload }} />
       </main>
     </div>
   )

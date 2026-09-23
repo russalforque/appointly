@@ -1,7 +1,7 @@
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from './supabase'
 import { unwrap } from './db'
-import type { Plan, Subscription } from './types'
+import type { Plan, PlanCapability, Subscription } from './types'
 
 export const fetchPlans = () =>
   unwrap<Plan[]>(supabase.from('plans').select('*').eq('is_active', true).order('sort_order'))
@@ -86,4 +86,21 @@ export function trialProgress(sub: Subscription | null): number | null {
   const end = new Date(sub.trial_end).getTime()
   if (end <= start) return null
   return Math.min(1, Math.max(0, (Date.now() - start) / (end - start)))
+}
+
+/**
+ * Whether a business's live subscription includes a capability. Mirrors the database's
+ * business_has_capability(), which is where the rule is actually enforced — this copy only
+ * decides what the dashboard shows.
+ */
+export function hasCapability(sub: Subscription | null, plans: Plan[], capability: PlanCapability): boolean {
+  if (!sub) return true // grandfathered, same as hasBillingAccess
+  if (sub.status === 'trialing') return !isTrialExpired(sub) // the trial shows the full product
+  if (sub.status !== 'active' || isSubscriptionExpired(sub)) return false
+  return Boolean(plans.find((p) => p.id === sub.plan_id)?.capabilities?.includes(capability))
+}
+
+/** The cheapest active plan that unlocks a capability, for "upgrade to X" copy. */
+export function planFor(plans: Plan[], capability: PlanCapability): Plan | undefined {
+  return plans.filter((p) => p.capabilities?.includes(capability)).sort((a, b) => a.price_cents - b.price_cents)[0]
 }

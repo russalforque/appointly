@@ -98,6 +98,9 @@ export interface AppNotification {
   created_at: string
 }
 
+/** Entitlement keys a plan unlocks; see plans.capabilities. */
+export type PlanCapability = 'notifications' | 'advanced_booking'
+
 export interface Plan {
   id: string
   name: string
@@ -105,6 +108,7 @@ export interface Plan {
   currency: string
   interval: 'month' | 'year'
   features: string[]
+  capabilities: PlanCapability[]
   is_active: boolean
   sort_order: number
 }
@@ -121,7 +125,7 @@ export interface Subscription {
   trial_end: string | null
   current_period_start: string | null
   current_period_end: string | null
-  provider: 'paymongo' | 'xendit'
+  provider: 'paymongo' | 'xendit' | 'gotyme'
   checkout_ref: string | null
   payment_ref: string | null
 }
@@ -168,6 +172,8 @@ export interface SubscriptionPayment {
   submitted_at: string | null
   verified_at: string | null
   rejected_at: string | null
+  terms_accepted_at: string | null
+  terms_version: string | null
 }
 
 /** A payment row joined with the business/owner details only a platform admin may read. */
@@ -193,6 +199,8 @@ export interface AdminPayment {
   submitted_at: string
   verified_at: string | null
   rejected_at: string | null
+  terms_accepted_at: string | null
+  terms_version: string | null
 }
 
 export interface PaymentCounts {
@@ -201,4 +209,38 @@ export interface PaymentCounts {
   rejected: number
   expired: number
   total: number
+}
+
+/** A business joined with its owner and subscription, readable only by a platform admin. */
+export interface AdminBusiness {
+  id: string
+  name: string
+  slug: string
+  category: string | null
+  is_active: boolean
+  created_at: string
+  owner_id: string | null
+  owner_name: string | null
+  owner_email: string | null
+  plan_id: string | null
+  plan_name: string | null
+  subscription_status: SubscriptionStatus | null
+  trial_end: string | null
+  current_period_end: string | null
+  provider: string | null
+  member_count: number
+  booking_count: number
+}
+
+/** The subscription states an admin may set by hand; 'pending' belongs to the payment flow. */
+export type AdminPlanStatus = 'trialing' | 'active' | 'past_due' | 'cancelled'
+
+/** A platform-admin account, as listed on the admins page. */
+export interface AdminUser {
+  user_id: string
+  full_name: string | null
+  /** Sign-in name, for staff accounts that have one. */
+  username: string | null
+  email: string | null
+  created_at: string
 }

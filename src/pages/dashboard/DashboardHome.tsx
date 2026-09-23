@@ -397,7 +397,7 @@ function DashboardSkeleton() {
 }
 
 export default function DashboardHome() {
-  const { business, timezone } = useBusiness()
+  const { business, timezone, can } = useBusiness()
   const siteUrl = `${window.location.origin}/book/${business.slug}`
   const wide = useMinWidth('(min-width: 1280px)')
   const todayVisible = wide ? TODAY_VISIBLE_WIDE : TODAY_VISIBLE
@@ -484,9 +484,11 @@ export default function DashboardHome() {
           <p className="mt-1 text-sm text-neutral-500">Here's what's happening with your bookings today.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2 lg:gap-3">
-          <div className="hidden sm:block">
-            <NotificationBell businessId={business.id} timezone={timezone} />
-          </div>
+          {can.notifications && (
+            <div className="hidden sm:block">
+              <NotificationBell businessId={business.id} timezone={timezone} />
+            </div>
+          )}
           {/* Desktop has room for the secondary action the phone header cannot fit */}
           <a
             href={siteUrl}

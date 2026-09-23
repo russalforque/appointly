@@ -70,6 +70,10 @@ export interface PaymentSubmission {
   paymentDate: string
   proofPath: string
   notes: string | null
+  /** The subscription terms checkbox. The database refuses the submission without it. */
+  termsAccepted: boolean
+  /** Which revision of the terms was on screen, from LEGAL_UPDATED. */
+  termsVersion: string
 }
 
 /** Amount, plan and business all come from the reserved record — none of them travel from here. */
@@ -80,6 +84,8 @@ export async function submitPayment(s: PaymentSubmission): Promise<SubscriptionP
     p_payment_date: s.paymentDate,
     p_proof_path: s.proofPath,
     p_notes: s.notes,
+    p_terms_accepted: s.termsAccepted,
+    p_terms_version: s.termsVersion,
   })
   if (error) throw new Error(friendlyError(error.message))
   return data as SubscriptionPayment
@@ -93,12 +99,6 @@ export function findPossibleDuplicate(payments: SubscriptionPayment[], transacti
 }
 
 // --- Platform admin ---------------------------------------------------------
-
-export async function isPlatformAdmin(): Promise<boolean> {
-  const { data, error } = await supabase.rpc('is_platform_admin')
-  if (error) return false
-  return data === true
-}
 
 export async function adminListPayments(status?: string): Promise<AdminPayment[]> {
   const { data, error } = await supabase.rpc('admin_list_subscription_payments', { p_status: status ?? null })

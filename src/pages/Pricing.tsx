@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { Check } from 'lucide-react'
 import { useAuth } from '../auth/auth'
-import { fetchPlans, fmtMoney, startCheckout } from '../lib/billing'
+import { fetchPlans, fmtMoney } from '../lib/billing'
 import { useLoad } from '../lib/useLoad'
 import { btn, btnGhost, card } from '../lib/ui'
 import { ErrorText, Loading } from '../components/Status'
@@ -10,20 +10,7 @@ import Logo from '../components/Logo'
 
 export default function Pricing() {
   const { session } = useAuth()
-  const { data: plans, loading, error } = useLoad(useCallback(fetchPlans, []))
-  const [busyPlan, setBusyPlan] = useState<string | null>(null)
-  const [checkoutError, setCheckoutError] = useState<string | null>(null)
-
-  async function choose(planId: string) {
-    setBusyPlan(planId)
-    setCheckoutError(null)
-    try {
-      window.location.href = await startCheckout(planId)
-    } catch (e) {
-      setCheckoutError(e instanceof Error ? e.message : 'Could not start checkout')
-      setBusyPlan(null)
-    }
-  }
+  const { data: plans, loading, error } = useLoad(useCallback(() => fetchPlans(), []))
 
   return (
     <div className="min-h-screen bg-white">
@@ -52,7 +39,6 @@ export default function Pricing() {
 
         {loading && <Loading />}
         <ErrorText message={error} />
-        <ErrorText message={checkoutError} />
 
         {plans && (
           <div className="mx-auto mt-10 grid max-w-3xl gap-6 text-left sm:grid-cols-2">
@@ -72,9 +58,9 @@ export default function Pricing() {
                   ))}
                 </ul>
                 {session ? (
-                  <button className={`${btn} mt-6`} disabled={busyPlan === plan.id} onClick={() => choose(plan.id)}>
-                    {busyPlan === plan.id ? 'Redirecting…' : 'Choose plan'}
-                  </button>
+                  <Link to={`/dashboard/billing/pay/${plan.id}`} className={`${btn} mt-6 text-center`}>
+                    Choose plan
+                  </Link>
                 ) : (
                   <Link to="/register" className={`${btn} mt-6 text-center`}>Get Started</Link>
                 )}

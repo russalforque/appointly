@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import { Bell, BellOff, CalendarCheck, CalendarX2, CheckCheck, Clock3, type LucideIcon } from 'lucide-react'
+import { BadgeCheck, Bell, BellOff, CalendarCheck, CalendarX2, CheckCheck, CheckCircle2, Clock3, Receipt, XCircle, type LucideIcon } from 'lucide-react'
 import { fetchNotifications, markAllNotificationsRead, markNotificationRead } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
 import { useLoad } from '../lib/useLoad'
@@ -13,6 +13,10 @@ const KIND: Record<string, { icon: LucideIcon; tint: string }> = {
   new_booking: { icon: CalendarCheck, tint: 'bg-green-50 text-green-600' },
   booking_cancelled: { icon: CalendarX2, tint: 'bg-red-50 text-red-600' },
   reminder: { icon: Clock3, tint: 'bg-blue-50 text-blue-600' },
+  payment_submitted: { icon: Receipt, tint: 'bg-blue-50 text-blue-600' },
+  payment_approved: { icon: CheckCircle2, tint: 'bg-green-50 text-green-600' },
+  payment_rejected: { icon: XCircle, tint: 'bg-red-50 text-red-600' },
+  plan_updated: { icon: BadgeCheck, tint: 'bg-brand-50 text-brand-600' },
 }
 const FALLBACK_KIND = { icon: Bell, tint: 'bg-neutral-100 text-neutral-500' }
 

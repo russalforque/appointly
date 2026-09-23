@@ -110,7 +110,7 @@ create index on payment_audit_log (payment_id, created_at desc);
 create index on payment_audit_log (business_id, created_at desc);
 
 -- GoTyme joins the gateways a subscription may have been paid through.
-alter table subscriptions drop constraint subscriptions_provider_check;
+alter table subscriptions drop constraint if exists subscriptions_provider_check;
 alter table subscriptions add constraint subscriptions_provider_check
   check (provider in ('paymongo', 'xendit', 'gotyme'));
 
@@ -251,8 +251,11 @@ declare
 begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
 
+  -- Runs before the row is locked, since it may clear this very draft when it is stale.
+  perform expire_stale_subscription_payments();
+
   select * into v_row from subscription_payments where id = p_payment_id for update;
-  if not found then raise exception 'Payment not found'; end if;
+  if not found then raise exception 'This payment session has expired. Please start the payment again.'; end if;
   if not is_business_admin(v_row.business_id) then
     raise exception 'You do not have permission to submit this payment';
   end if;
@@ -282,8 +285,6 @@ begin
      or split_part(p_proof_path, '/', 3) = '' then
     raise exception 'Upload a proof of payment before submitting';
   end if;
-
-  perform expire_stale_subscription_payments();
 
   if exists (
     select 1 from subscription_payments

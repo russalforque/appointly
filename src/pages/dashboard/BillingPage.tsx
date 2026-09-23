@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, Check, Clock3, CreditCard, Loader2, LockKeyhole, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { AlertTriangle, Check, Clock3, CreditCard, LockKeyhole, RefreshCw, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
 import {
   daysUntil,
   fetchPlans,
@@ -7,46 +8,61 @@ import {
   fmtDate,
   fmtMoney,
   hasBillingAccess,
+  isSubscriptionExpired,
   isTrialExpired,
-  startCheckout,
   trialProgress,
 } from '../../lib/billing'
+import { fetchPaymentSettings, fetchPayments } from '../../lib/payments'
 import { useLoad } from '../../lib/useLoad'
 import { btn, btnGhost, panel } from '../../lib/ui'
 import type { Plan, Subscription, SubscriptionStatus } from '../../lib/types'
 import { Bone, ErrorText, PageHeaderSkeleton } from '../../components/Status'
+import PaymentHistory from './PaymentHistory'
 import { useBusiness } from './useBusiness'
 
-const PENDING_POLL_MS = 5000
+// A pending payment is cleared by hand, so this only needs to be quick enough to feel live.
+const PENDING_POLL_MS = 20000
 
 type StatusTone = { label: string; pill: string; card: string; dot: string }
 
 /** One place to decide how each subscription state looks and reads. */
-const STATUS_TONE: Record<SubscriptionStatus | 'none' | 'trial_expired', StatusTone> = {
+const STATUS_TONE: Record<SubscriptionStatus | 'none' | 'trial_expired' | 'expired', StatusTone> = {
   active: { label: 'Active', pill: 'border-green-200 bg-green-50 text-green-700', card: 'border-neutral-200/70 bg-white', dot: 'bg-green-600' },
   trialing: { label: 'Free trial', pill: 'border-brand-200 bg-brand-50 text-brand-700', card: 'border-brand-200/70 bg-brand-50/40', dot: 'bg-brand-600' },
   trial_expired: { label: 'Trial ended', pill: 'border-amber-200 bg-amber-50 text-amber-700', card: 'border-amber-200/70 bg-amber-50/40', dot: 'bg-amber-500' },
-  pending: { label: 'Payment pending', pill: 'border-blue-200 bg-blue-50 text-blue-700', card: 'border-blue-200/70 bg-blue-50/40', dot: 'bg-blue-500' },
+  expired: { label: 'Expired', pill: 'border-amber-200 bg-amber-50 text-amber-700', card: 'border-amber-200/70 bg-amber-50/40', dot: 'bg-amber-500' },
+  pending: { label: 'Payment being verified', pill: 'border-blue-200 bg-blue-50 text-blue-700', card: 'border-blue-200/70 bg-blue-50/40', dot: 'bg-blue-500' },
   past_due: { label: 'Past due', pill: 'border-red-200 bg-red-50 text-red-700', card: 'border-red-200/70 bg-red-50/40', dot: 'bg-red-500' },
   cancelled: { label: 'Cancelled', pill: 'border-neutral-200 bg-neutral-100 text-neutral-600', card: 'border-neutral-200/70 bg-neutral-50', dot: 'bg-neutral-400' },
   none: { label: 'No subscription', pill: 'border-neutral-200 bg-neutral-100 text-neutral-600', card: 'border-neutral-200/70 bg-white', dot: 'bg-neutral-400' },
 }
 
 const toneKey = (sub: Subscription | null) =>
-  !sub ? 'none' : sub.status === 'trialing' && isTrialExpired(sub) ? 'trial_expired' : sub.status
+  !sub
+    ? 'none'
+    : sub.status === 'trialing' && isTrialExpired(sub)
+      ? 'trial_expired'
+      : isSubscriptionExpired(sub)
+        ? 'expired'
+        : sub.status
 
 export default function BillingPage() {
   const { business } = useBusiness()
+  const navigate = useNavigate()
   const load = useCallback(async () => {
-    const [plans, subscription] = await Promise.all([fetchPlans(), fetchSubscription(business.id)])
-    return { plans, subscription }
+    const [plans, subscription, payments, settings] = await Promise.all([
+      fetchPlans(),
+      fetchSubscription(business.id),
+      fetchPayments(business.id),
+      fetchPaymentSettings(),
+    ])
+    return { plans, subscription, payments, settings }
   }, [business.id])
   const { data, loading, error, reload } = useLoad(load)
-  const [busyPlan, setBusyPlan] = useState<string | null>(null)
-  const [checkoutError, setCheckoutError] = useState<string | null>(null)
   const [refreshedFrom, setRefreshedFrom] = useState<unknown>(null)
 
-  const pending = data?.subscription?.status === 'pending'
+  const latest = data?.payments[0] ?? null
+  const pending = latest?.status === 'pending'
   useEffect(() => {
     if (!pending) return
     const id = setInterval(reload, PENDING_POLL_MS)
@@ -59,17 +75,6 @@ export default function BillingPage() {
   function refresh() {
     setRefreshedFrom(data)
     reload()
-  }
-
-  async function choose(planId: string) {
-    setBusyPlan(planId)
-    setCheckoutError(null)
-    try {
-      window.location.assign(await startCheckout(planId))
-    } catch (e) {
-      setCheckoutError(e instanceof Error ? e.message : 'Could not start checkout')
-      setBusyPlan(null)
-    }
   }
 
   if (loading)
@@ -96,24 +101,28 @@ export default function BillingPage() {
     )
   if (error || !data) return <ErrorText message={error} />
 
-  const { plans, subscription } = data
+  const { plans, subscription, payments, settings } = data
   const locked = !hasBillingAccess(subscription)
   const tone = STATUS_TONE[toneKey(subscription)]
   const currentPlan: Plan | undefined = plans.find((p) => p.id === subscription?.plan_id)
   const trialDaysLeft = subscription?.trial_end ? daysUntil(subscription.trial_end) : null
+  const paymentsOff = !settings?.is_active
+  const rejected = latest?.status === 'rejected' ? latest : null
 
   // How far through the trial we are, so "6 days left" has something to sit against.
   const progress = trialProgress(subscription)
 
   const detail = (() => {
     if (!subscription) return 'You are not on a plan yet. Choose one below to get started.'
+    if (isSubscriptionExpired(subscription))
+      return `Your plan ended on ${fmtDate(subscription.current_period_end!)}. Choose a plan below to continue.`
     switch (subscription.status) {
       case 'active':
         return subscription.current_period_end ? `Renews on ${fmtDate(subscription.current_period_end)}.` : 'Your plan is active.'
       case 'pending':
-        return "We're waiting for Xendit to confirm your payment. This page checks again every few seconds."
+        return 'Your payment is being verified by our team.'
       case 'past_due':
-        return 'Your last payment failed. Choose a plan below to restore access.'
+        return 'Your last payment could not be completed. Choose a plan below to restore access.'
       case 'cancelled':
         return 'Your subscription was cancelled. Choose a plan below to start again.'
       case 'trialing':
@@ -130,7 +139,7 @@ export default function BillingPage() {
     <div className="mx-auto max-w-3xl space-y-4 pb-[env(safe-area-inset-bottom)] sm:space-y-6">
       <div className="min-w-0">
         <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Billing</h1>
-        <p className="mt-1 text-sm text-neutral-500">Manage your subscription and plan.</p>
+        <p className="mt-1 text-sm text-neutral-500">Manage your subscription and payments.</p>
       </div>
 
       {locked && (
@@ -139,7 +148,7 @@ export default function BillingPage() {
           <div className="min-w-0">
             <p className="font-semibold">
               {subscription?.status === 'past_due'
-                ? 'Your last payment failed'
+                ? 'Your subscription has expired'
                 : subscription?.status === 'cancelled'
                   ? 'Your subscription was cancelled'
                   : 'Your free trial has ended'}
@@ -158,11 +167,7 @@ export default function BillingPage() {
       <section className={`rounded-2xl border p-4 shadow-sm shadow-neutral-900/[0.04] sm:p-5 ${tone.card}`}>
         <div className="flex items-start justify-between gap-3">
           <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${tone.pill}`}>
-            {subscription?.status === 'pending' ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-            )}
+            <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
             {tone.label}
           </span>
           <button
@@ -186,6 +191,27 @@ export default function BillingPage() {
         </p>
         <p className="mt-1 text-sm text-neutral-600">{detail}</p>
 
+        {subscription?.current_period_start && !isSubscriptionExpired(subscription) && subscription.status === 'active' && (
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 border-t border-neutral-200/70 pt-3 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-neutral-500">Started</dt>
+              <dd className="font-medium text-neutral-900">{fmtDate(subscription.current_period_start)}</dd>
+            </div>
+            {subscription.current_period_end && (
+              <div>
+                <dt className="text-xs text-neutral-500">Expires</dt>
+                <dd className="font-medium text-neutral-900">{fmtDate(subscription.current_period_end)}</dd>
+              </div>
+            )}
+            <div>
+              <dt className="text-xs text-neutral-500">Payment method</dt>
+              <dd className="font-medium text-neutral-900">
+                {subscription.provider === 'gotyme' ? 'GoTyme Bank / QR Ph' : 'Card / e-wallet'}
+              </dd>
+            </div>
+          </dl>
+        )}
+
         {progress !== null && (
           <div className="mt-3" aria-hidden="true">
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/70">
@@ -195,7 +221,30 @@ export default function BillingPage() {
         )}
       </section>
 
-      <ErrorText message={checkoutError} />
+      {pending && latest && (
+        <div className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3.5 text-sm text-blue-800">
+          <Clock3 size={18} strokeWidth={1.75} className="mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold">Payment received — waiting for verification</p>
+            <p className="mt-0.5 text-blue-700">
+              Reference <span className="font-mono font-semibold">{latest.payment_reference}</span>. We&apos;ll notify you
+              once your subscription is active, usually within one business day.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {rejected && (
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3.5 text-sm text-red-800">
+          <XCircle size={18} strokeWidth={1.75} className="mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="font-semibold">Payment rejected</p>
+            <p className="mt-0.5 text-red-700">
+              {rejected.rejection_reason ?? 'We could not verify this payment.'} You can submit a new payment below.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div id="plans" className="scroll-mt-20">
         <h2 className="flex items-center gap-2.5 text-[16px] font-semibold text-neutral-900">
@@ -205,6 +254,13 @@ export default function BillingPage() {
           {locked ? 'Choose a plan to continue' : 'Plans'}
         </h2>
 
+        {paymentsOff && (
+          <p className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
+            <AlertTriangle size={16} strokeWidth={1.75} className="mt-px shrink-0" />
+            Payments are temporarily unavailable. Please try again shortly.
+          </p>
+        )}
+
         {plans.length === 0 ? (
           <div className={`${panel} mt-3 flex items-start gap-3 text-sm text-neutral-500`}>
             <AlertTriangle size={17} strokeWidth={1.75} className="mt-0.5 shrink-0 text-neutral-400" />
@@ -213,8 +269,9 @@ export default function BillingPage() {
         ) : (
           <div className="mt-3 grid gap-3 sm:grid-cols-2 sm:gap-4">
             {plans.map((plan) => {
-              const isCurrent = subscription?.status === 'active' && subscription.plan_id === plan.id
-              const isBusy = busyPlan === plan.id
+              const isCurrent =
+                subscription?.status === 'active' && subscription.plan_id === plan.id && !isSubscriptionExpired(subscription)
+              const disabled = paymentsOff || pending
               return (
                 <div
                   key={plan.id}
@@ -250,11 +307,10 @@ export default function BillingPage() {
 
                   <button
                     className={`${isCurrent ? btnGhost : btn} mt-5 flex h-12 w-full items-center justify-center gap-1.5 sm:h-11`}
-                    disabled={isCurrent || isBusy}
-                    onClick={() => choose(plan.id)}
+                    disabled={disabled}
+                    onClick={() => navigate(`/dashboard/billing/pay/${plan.id}`)}
                   >
-                    {isBusy && <Loader2 size={16} className="animate-spin" />}
-                    {isCurrent ? 'Current plan' : isBusy ? 'Opening checkout…' : `Choose ${plan.name}`}
+                    {pending ? 'Payment being verified' : isCurrent ? 'Renew' : `Choose ${plan.name}`}
                   </button>
                 </div>
               )
@@ -263,16 +319,13 @@ export default function BillingPage() {
         )}
       </div>
 
+      <PaymentHistory payments={payments} plans={plans} />
+
       <div className="flex items-start gap-2.5 rounded-2xl border border-neutral-200 bg-neutral-100/60 px-4 py-3.5 text-xs text-neutral-500">
         <ShieldCheck size={16} strokeWidth={1.75} className="mt-px shrink-0 text-neutral-400" />
         <p>
-          Payments are handled by Xendit — you'll be redirected there to complete checkout, and we never see your card details.
-          {pending && (
-            <span className="mt-1 flex items-center gap-1.5 font-medium text-neutral-600">
-              <Clock3 size={13} strokeWidth={1.75} />
-              Checking for your payment every few seconds…
-            </span>
-          )}
+          Payments are made by bank transfer or QR Ph through GoTyme Bank. Our team verifies every payment by hand before a
+          subscription is activated — we never see your banking credentials.
         </p>
       </div>
     </div>

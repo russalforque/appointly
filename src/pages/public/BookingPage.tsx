@@ -9,6 +9,7 @@ import { unwrap } from '../../lib/db'
 import { createBooking, getAvailableSlots, type Slot } from '../../lib/booking'
 import { addDays, fmtClock, fmtDuration, fmtPeso, fmtTime, todayIn } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
+import { usePageMeta } from '../../lib/usePageMeta'
 import type { Business, Service, Staff, WorkingHours } from '../../lib/types'
 
 // Anonymous users may only read these staff columns (see 0005_security_hardening.sql)
@@ -227,6 +228,18 @@ function Booker({ catalog }: { catalog: Catalog }) {
   const accentTint = { backgroundColor: `color-mix(in srgb, ${accent} 10%, white)` }
   const todayKey = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(new Date()).toLowerCase().slice(0, 3)
   const navigate = useNavigate()
+
+  // The only page of Appointly a customer ever finds through search or a shared link, so it
+  // carries the business's own name. Nothing private goes in here: name, category and the
+  // public description are already on the page itself.
+  usePageMeta({
+    title: `Book an appointment with ${business.name} | Appointly`,
+    description:
+      business.description?.trim() ||
+      `Book an appointment with ${business.name} online. Choose a service, pick a time that suits you, and confirm in a few taps.`,
+    image: business.logo_url ?? undefined,
+  })
+
   const [serviceId, setServiceId] = useState('')
   const [staffId, setStaffId] = useState('') // '' = any available
   const [date, setDate] = useState('')

@@ -221,6 +221,8 @@ export default function CustomersPage() {
   const { data, loading, error } = useLoad(load)
 
   const bookingUrl = `${window.location.origin}/book/${business.slug}`
+  // Deliberate: `data` re-reads the clock when the page reloads, so "upcoming" is not frozen at mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const now = useMemo(() => new Date(), [data])
   const statsById = useMemo(() => buildStats(data?.bookings ?? [], now), [data, now])
 

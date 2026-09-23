@@ -6,6 +6,7 @@ import { useLoad } from '../../lib/useLoad'
 import { btn, btnGhost, panel } from '../../lib/ui'
 import type { BusinessSettings } from '../../lib/types'
 import Switch from '../../components/Switch'
+import UpgradeNotice from '../../components/UpgradeNotice'
 import { ErrorText, FormSkeleton, PageHeaderSkeleton, Saved } from '../../components/Status'
 import { useBusiness } from './useBusiness'
 
@@ -84,7 +85,7 @@ function SectionHeading({ icon: Icon, tint, children }: { icon: typeof Timer; ti
 }
 
 export default function BookingSettingsPage() {
-  const { business } = useBusiness()
+  const { business, can } = useBusiness()
   const load = useCallback(
     () => unwrap<BusinessSettings>(supabase.from('business_settings').select('*').eq('business_id', business.id).single()),
     [business.id],
@@ -132,10 +133,15 @@ export default function BookingSettingsPage() {
       .update({
         min_notice_hours: values.notice,
         max_advance_days: values.advance,
-        buffer_minutes: values.buffer,
-        allow_customer_cancellation: values.allowCancel,
-        cancellation_deadline_hours: values.deadline,
         auto_confirm: values.autoConfirm,
+        // Business-plan columns; sending them without the plan trips the database guard.
+        ...(can.advancedBooking
+          ? {
+              buffer_minutes: values.buffer,
+              allow_customer_cancellation: values.allowCancel,
+              cancellation_deadline_hours: values.deadline,
+            }
+          : {}),
       })
       .eq('business_id', business.id)
     setBusy(false)
@@ -235,14 +241,18 @@ export default function BookingSettingsPage() {
               onChange={(n) => set('advance', n)}
             />
 
-            <OptionChips
-              legend="Buffer between appointments"
-              hint="Extra gap added after every appointment, on top of any service-specific buffer."
-              options={optionsFor(BUFFER_MINUTES, values.buffer)}
-              value={values.buffer}
-              format={bufferLabel}
-              onChange={(n) => set('buffer', n)}
-            />
+            {can.advancedBooking ? (
+              <OptionChips
+                legend="Buffer between appointments"
+                hint="Extra gap added after every appointment, on top of any service-specific buffer."
+                options={optionsFor(BUFFER_MINUTES, values.buffer)}
+                value={values.buffer}
+                format={bufferLabel}
+                onChange={(n) => set('buffer', n)}
+              />
+            ) : (
+              <UpgradeNotice feature="Buffers between appointments" />
+            )}
           </section>
 
           <section className={`${panel} space-y-4`}>
@@ -250,30 +260,36 @@ export default function BookingSettingsPage() {
               Cancellations
             </SectionHeading>
 
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 px-3.5 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-neutral-800">Allow customer cancellations</p>
-                <p className="mt-0.5 text-xs text-neutral-500">Let customers cancel from their confirmation link.</p>
-              </div>
-              <Switch
-                checked={values.allowCancel}
-                onChange={() => set('allowCancel', !values.allowCancel)}
-                label="Allow customers to cancel their own bookings"
-              />
-            </div>
+            {can.advancedBooking ? (
+              <>
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 px-3.5 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-neutral-800">Allow customer cancellations</p>
+                    <p className="mt-0.5 text-xs text-neutral-500">Let customers cancel from their confirmation link.</p>
+                  </div>
+                  <Switch
+                    checked={values.allowCancel}
+                    onChange={() => set('allowCancel', !values.allowCancel)}
+                    label="Allow customers to cancel their own bookings"
+                  />
+                </div>
 
-            {/* Indented under the toggle it depends on, and only shown once it applies */}
-            {values.allowCancel && (
-              <div className="border-l-2 border-neutral-100 pl-4">
-                <OptionChips
-                  legend="Cancellation deadline"
-                  hint="Customers can no longer cancel online once this deadline passes."
-                  options={optionsFor(DEADLINE_HOURS, values.deadline)}
-                  value={values.deadline}
-                  format={(h) => `${hoursLabel(h)} before`}
-                  onChange={(n) => set('deadline', n)}
-                />
-              </div>
+                {/* Indented under the toggle it depends on, and only shown once it applies */}
+                {values.allowCancel && (
+                  <div className="border-l-2 border-neutral-100 pl-4">
+                    <OptionChips
+                      legend="Cancellation deadline"
+                      hint="Customers can no longer cancel online once this deadline passes."
+                      options={optionsFor(DEADLINE_HOURS, values.deadline)}
+                      value={values.deadline}
+                      format={(h) => `${hoursLabel(h)} before`}
+                      onChange={(n) => set('deadline', n)}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <UpgradeNotice feature="Cancellation rules" />
             )}
           </section>
 
