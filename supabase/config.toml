@@ -1,0 +1,5 @@
+[functions.xendit-checkout]
+verify_jwt = false
+
+[functions.xendit-webhook]
+verify_jwt = false

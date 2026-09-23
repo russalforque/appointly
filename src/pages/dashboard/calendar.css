@@ -1,0 +1,195 @@
+/* Restyle react-big-calendar to match the dashboard's neutral/brand design language. */
+
+.app-calendar .rbc-off-range-bg {
+  background: var(--color-neutral-50, #fafafa);
+}
+
+.app-calendar .rbc-today {
+  background-color: color-mix(in srgb, var(--color-brand-500) 6%, white);
+}
+
+.app-calendar .rbc-day-bg {
+  transition: background-color 0.12s ease;
+}
+
+.app-calendar .rbc-month-view .rbc-day-bg:hover {
+  background-color: var(--color-neutral-50, #fafafa);
+}
+
+.app-calendar .rbc-header {
+  padding: 10px 4px;
+  border-color: #e5e5e5;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #a3a3a3;
+  background: #fafafa;
+}
+
+.app-calendar .rbc-month-view,
+.app-calendar .rbc-time-view,
+.app-calendar .rbc-agenda-view table.rbc-agenda-table {
+  border-color: #e5e5e5;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.app-calendar .rbc-day-bg + .rbc-day-bg,
+.app-calendar .rbc-month-row + .rbc-month-row,
+.app-calendar .rbc-header + .rbc-header,
+.app-calendar .rbc-time-content > * + * > *,
+.app-calendar .rbc-timeslot-group,
+.app-calendar .rbc-time-header-content,
+.app-calendar .rbc-agenda-table tbody > tr > td,
+.app-calendar .rbc-agenda-table thead > tr > th {
+  border-color: #f0f0f0;
+}
+
+.app-calendar .rbc-time-content,
+.app-calendar .rbc-time-header.rbc-overflowing {
+  border-color: #e5e5e5;
+}
+
+.app-calendar .rbc-event {
+  border: none;
+  border-radius: 6px;
+  padding: 2px 6px;
+  box-shadow: none;
+  font-weight: 500;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+.app-calendar .rbc-event:hover {
+  filter: brightness(0.97);
+}
+
+.app-calendar .rbc-event.rbc-selected,
+.app-calendar .rbc-event:focus {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 1px;
+  filter: none;
+}
+
+.app-calendar .rbc-row-segment .rbc-event-content {
+  font-size: 11px;
+}
+
+.app-calendar .rbc-event-label {
+  display: none;
+}
+
+.app-calendar .rbc-show-more {
+  color: var(--color-brand-600);
+  font-weight: 600;
+  font-size: 11px;
+  background: transparent;
+}
+
+.app-calendar .rbc-show-more:hover {
+  text-decoration: underline;
+}
+
+.app-calendar .rbc-current-time-indicator {
+  background-color: var(--color-brand-600);
+  height: 2px;
+}
+
+.app-calendar .rbc-agenda-empty,
+.app-calendar .rbc-agenda-view table.rbc-agenda-table {
+  font-size: 13px;
+}
+
+.app-calendar .rbc-agenda-date-cell,
+.app-calendar .rbc-agenda-time-cell {
+  color: #737373;
+  white-space: nowrap;
+}
+
+.app-calendar .rbc-off-range {
+  color: #d4d4d4;
+}
+
+.app-calendar .rbc-date-cell {
+  padding: 6px 6px 0 0;
+  font-size: 12px;
+  color: #404040;
+}
+
+.app-calendar .rbc-date-cell > a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-calendar .rbc-date-cell.rbc-now > a {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background-color: var(--color-neutral-900, #171717);
+  color: #fff;
+  font-weight: 700;
+}
+
+.app-calendar .rbc-toolbar,
+.app-calendar .rbc-toolbar button {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .app-calendar .rbc-header {
+    padding: 6px 2px;
+    font-size: 10px;
+  }
+
+  .app-calendar .rbc-date-cell {
+    padding: 3px 3px 0 0;
+    font-size: 11px;
+  }
+
+  .app-calendar .rbc-event {
+    padding: 1px 4px;
+  }
+
+  .app-calendar .rbc-row-segment .rbc-event-content {
+    font-size: 10px;
+  }
+
+  .app-calendar .rbc-show-more {
+    font-size: 10px;
+  }
+}
+
+/* Large screens: the grid gets more room, so the type and hit areas grow with it. */
+@media (min-width: 1280px) {
+  .app-calendar .rbc-header {
+    padding: 12px 8px;
+    font-size: 12px;
+  }
+
+  .app-calendar .rbc-date-cell {
+    padding: 8px 8px 0 0;
+    font-size: 13px;
+  }
+
+  .app-calendar .rbc-date-cell.rbc-now > a {
+    height: 24px;
+    min-width: 24px;
+  }
+
+  .app-calendar .rbc-event {
+    padding: 3px 8px;
+    border-radius: 8px;
+  }
+
+  .app-calendar .rbc-row-segment .rbc-event-content,
+  .app-calendar .rbc-show-more {
+    font-size: 12px;
+  }
+
+  .app-calendar .rbc-time-gutter .rbc-label {
+    padding: 0 10px;
+    font-size: 12px;
+  }
+}
