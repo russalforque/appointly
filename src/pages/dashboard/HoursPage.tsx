@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { CalendarDays, CalendarOff, Check, Clock3, Copy, Info, Loader2, Plus, RotateCcw, Save, Wand2 } from 'lucide-react'
+import { CalendarDays, CalendarOff, Check, Clock3, Copy, Info, Plus, Wand2 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { unwrap, friendlyError } from '../../lib/db'
 import { useLoad } from '../../lib/useLoad'
+import { useConfirm } from '../../lib/confirm'
+import { useToast } from '../../lib/toast'
 import { btn, btnGhost, input, panel } from '../../lib/ui'
 import { fmtClock, fmtDay, fmtDuration, todayIn } from '../../lib/format'
 import type { BusinessSettings, WorkingHours } from '../../lib/types'
@@ -10,7 +12,9 @@ import Field from '../../components/Field'
 import Chip from '../../components/Chip'
 import Modal from '../../components/Modal'
 import Select from '../../components/Select'
-import { ErrorText, FormSkeleton, PageHeaderSkeleton, Saved } from '../../components/Status'
+import UpgradeNotice from '../../components/UpgradeNotice'
+import SettingsHeader from '../../components/SettingsHeader'
+import { ErrorState, FormSkeleton, PageHeaderSkeleton } from '../../components/Status'
 import { useBusiness } from './useBusiness'
 
 const DAYS = [
@@ -163,7 +167,7 @@ function CopyHoursSheet({
 }
 
 export default function HoursPage() {
-  const { business, reload: reloadBusiness } = useBusiness()
+  const { business, can, reload: reloadBusiness } = useBusiness()
   const load = useCallback(
     () => unwrap<BusinessSettings>(supabase.from('business_settings').select('*').eq('business_id', business.id).single()),
     [business.id],
@@ -171,7 +175,8 @@ export default function HoursPage() {
   const { data: s, loading, error: loadError, reload } = useLoad(load)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const toast = useToast()
+  const confirm = useConfirm()
   const [values, setValues] = useState<Values | null>(null)
   const [initial, setInitial] = useState<Values | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
@@ -194,13 +199,6 @@ export default function HoursPage() {
     setValues(snapshot)
     setInitial(snapshot)
   }, [s])
-
-  // The mobile save bar slides away on success, so confirm the write briefly and then clear.
-  useEffect(() => {
-    if (!saved) return
-    const timer = setTimeout(() => setSaved(false), 2500)
-    return () => clearTimeout(timer)
-  }, [saved])
 
   const isDirty = !!values && !!initial && JSON.stringify(values) !== JSON.stringify(initial)
 
@@ -268,7 +266,6 @@ export default function HoursPage() {
     setValues(initial)
     setFieldErrors({})
     setError(null)
-    setSaved(false)
   }
 
   async function save(e: FormEvent<HTMLFormElement>) {
@@ -289,32 +286,39 @@ export default function HoursPage() {
     }
     setSaving(true)
     setError(null)
-    setSaved(false)
     const { error } = await supabase
       .from('business_settings')
-      .update({ working_hours, timezone: values.timezone, slot_interval_minutes: values.interval })
+      .update({
+        working_hours,
+        timezone: values.timezone,
+        // Sending it without the plan trips the advanced-settings guard (0021), even unchanged.
+        ...(can.advancedBooking ? { slot_interval_minutes: values.interval } : {}),
+      })
       .eq('business_id', business.id)
     setSaving(false)
     setError(error ? friendlyError(error.message) : null)
     if (!error) {
       setInitial(values)
-      setSaved(true)
+      toast('Hours saved')
       reload()
       reloadBusiness()
     }
   }
 
-  async function updateBlocked(patch: Partial<BusinessSettings>) {
+  async function updateBlocked(patch: Partial<BusinessSettings>, done: string) {
     const { error } = await supabase.from('business_settings').update(patch).eq('business_id', business.id)
     setError(error ? friendlyError(error.message) : null)
-    if (!error) reload()
+    if (!error) {
+      toast(done)
+      reload()
+    }
   }
 
   function addBlocked(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const f = e.currentTarget
     const date = String(new FormData(f).get('date'))
-    if (s && !s.blocked_dates.includes(date)) updateBlocked({ blocked_dates: [...s.blocked_dates, date].sort() })
+    if (s && !s.blocked_dates.includes(date)) updateBlocked({ blocked_dates: [...s.blocked_dates, date].sort() }, `${fmtDay(date)} blocked`)
     f.reset()
   }
 
@@ -325,9 +329,10 @@ export default function HoursPage() {
         <FormSkeleton sections={2} fieldsPerSection={3} />
       </div>
     )
-  if (loadError || !s || !values) return <ErrorText message={loadError ?? 'Settings not found.'} />
+  if (loadError || !s || !values) return <ErrorState message={loadError ?? 'Settings not found.'} onRetry={reload} />
 
   const zones = Intl.supportedValuesOf('timeZone')
+  const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const intervalOptions = INTERVALS.includes(values.interval) ? INTERVALS : [...INTERVALS, values.interval].sort((a, b) => a - b)
   const today = todayIn(values.timezone)
   const summaryLine =
@@ -337,43 +342,17 @@ export default function HoursPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      {/* Desktop: sticky action bar keeps Save/Discard reachable the whole way down the form */}
-      <div className="sticky top-0 z-10 -mx-8 hidden flex-wrap items-center justify-between gap-3 border-b border-neutral-200/70 bg-neutral-50/95 px-8 py-4 backdrop-blur md:flex">
-        <div className="min-w-0">
-          <h1 className="text-[28px] font-semibold tracking-tight text-neutral-900">Business Hours</h1>
-          <p className="mt-1 text-sm text-neutral-500">{summaryLine}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <ErrorText message={error} />
-          <Saved show={saved} />
-          {isDirty && !saving && (
-            <button type="button" onClick={discard} className={`${btnGhost} flex items-center gap-1.5`}>
-              <RotateCcw size={14} strokeWidth={1.75} />
-              Discard
-            </button>
-          )}
-          <button form="hours-form" className={`${btn} flex items-center gap-1.5`} disabled={saving || !isDirty}>
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} strokeWidth={1.75} />}
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
+      <SettingsHeader
+        title="Business Hours"
+        subtitle={summaryLine}
+        form="hours-form"
+        dirty={isDirty}
+        saving={saving}
+        error={error}
+        onDiscard={discard}
+      />
 
-      {/* Mobile: header scrolls away — actions live in the bottom bar, within thumb reach */}
-      <div className="flex items-start justify-between gap-3 pt-1 md:hidden">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">Business Hours</h1>
-          <p className="mt-1 text-sm text-neutral-500">{summaryLine}</p>
-        </div>
-        {isDirty && (
-          <span className="mt-1 flex flex-none items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Unsaved
-          </span>
-        )}
-      </div>
-
-      <div className="space-y-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:space-y-6 md:pb-6 md:pt-6">
+      <div className="space-y-4 pt-4 sm:space-y-6 md:pt-6">
         <form id="hours-form" onSubmit={save} className="space-y-4 sm:space-y-6">
           <section className={`${panel} !p-3 sm:!p-5`}>
             <div className="px-1.5 sm:px-0">
@@ -418,10 +397,10 @@ export default function HoursPage() {
                     key={k}
                     className={`-mx-1.5 rounded-xl px-1.5 py-2 transition-colors sm:px-2 sm:py-2.5 ${isToday ? 'bg-brand-50/70' : ''}`}
                   >
-                    <div className="flex items-center gap-2 sm:gap-4">
-                      <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:w-36 sm:flex-none">
+                    <div className="flex items-center gap-2 sm:gap-3 lg:gap-4">
+                      <div className="flex min-w-0 flex-1 items-center gap-1.5 lg:w-32 lg:flex-none xl:w-36">
                         <span
-                          className={`truncate text-[15px] font-semibold sm:text-sm ${day.open ? 'text-neutral-900' : 'text-neutral-400'}`}
+                          className={`truncate text-[15px] font-semibold lg:text-sm ${day.open ? 'text-neutral-900' : 'text-neutral-400'}`}
                         >
                           {label}
                         </span>
@@ -432,8 +411,8 @@ export default function HoursPage() {
                         )}
                       </div>
 
-                      {/* Desktop: the times sit inline on the same row */}
-                      <div className="hidden min-w-0 flex-1 items-center gap-2 sm:flex">
+                      {/* Desktop: the times sit inline on the same row (needs ~650px, so not before lg) */}
+                      <div className="hidden min-w-0 flex-1 items-center gap-2 lg:flex">
                         {day.open ? (
                           <>
                             <input
@@ -472,10 +451,10 @@ export default function HoursPage() {
                       </button>
                     </div>
 
-                    {/* Mobile: labelled time pair on its own line, full-width tap targets */}
+                    {/* Phones and tablets: labelled time pair on its own line, full-width tap targets */}
                     {day.open && (
-                      <div className="mt-2 sm:hidden">
-                        <div className="grid grid-cols-2 gap-2">
+                      <div className="mt-2 lg:hidden">
+                        <div className="grid grid-cols-2 gap-2 sm:max-w-md">
                           <label className="block">
                             <span className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-400">Opens</span>
                             <input
@@ -533,30 +512,51 @@ export default function HoursPage() {
               </Select>
             </Field>
 
-            <div>
-              <span className="mb-1 block text-sm font-medium text-slate-700">Slot interval</span>
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Slot interval in minutes">
-                {intervalOptions.map((n) => {
-                  const active = values.interval === n
-                  return (
-                    <button
-                      key={n}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => setValues((v) => (v ? { ...v, interval: n } : v))}
-                      className={`h-11 min-w-16 rounded-xl border px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-10 ${
-                        active ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
-                      }`}
-                    >
-                      {n} min
-                    </button>
-                  )
-                })}
+            {timezone === 'UTC' && browserTimezone && browserTimezone !== 'UTC' && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
+                <p className="min-w-0 flex-1">
+                  Your hours are being read in UTC. If your business is in {browserTimezone}, switch to it so customers
+                  see the right times.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setValues((v) => (v ? { ...v, timezone: browserTimezone } : v))}
+                  className="h-9 flex-none rounded-lg border border-amber-300 bg-white px-3 text-sm font-medium text-amber-900 outline-none transition-colors hover:bg-amber-100 focus-visible:ring-2 focus-visible:ring-amber-600"
+                >
+                  Use {browserTimezone}
+                </button>
               </div>
-              <p className="mt-1.5 text-xs text-neutral-500">
-                How far apart bookable start times are — a new slot every {values.interval} minutes.
-              </p>
-            </div>
+            )}
+
+            {/* Changing the interval is a Business-plan setting; the database rejects it otherwise. */}
+            {!can.advancedBooking ? (
+              <UpgradeNotice feature="Custom slot intervals" />
+            ) : (
+              <div>
+                <span className="mb-1 block text-sm font-medium text-slate-700">Slot interval</span>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Slot interval in minutes">
+                  {intervalOptions.map((n) => {
+                    const active = values.interval === n
+                    return (
+                      <button
+                        key={n}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setValues((v) => (v ? { ...v, interval: n } : v))}
+                        className={`h-11 min-w-16 rounded-xl border px-3 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-10 ${
+                          active ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'
+                        }`}
+                      >
+                        {n} min
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1.5 text-xs text-neutral-500">
+                  How far apart bookable start times are — a new slot every {values.interval} minutes.
+                </p>
+              </div>
+            )}
           </section>
         </form>
 
@@ -605,9 +605,13 @@ export default function HoursPage() {
                 <Chip
                   key={d}
                   removeLabel={`Unblock ${fmtDay(d)}`}
-                  onRemove={() => {
-                    if (window.confirm(`Unblock ${fmtDay(d)}? Customers will be able to book that day.`))
-                      updateBlocked({ blocked_dates: s.blocked_dates.filter((x) => x !== d) })
+                  onRemove={async () => {
+                    const ok = await confirm({
+                      title: `Unblock ${fmtDay(d)}?`,
+                      body: 'Customers will be able to book that day again, within your weekly hours.',
+                      confirmLabel: 'Unblock',
+                    })
+                    if (ok) updateBlocked({ blocked_dates: s.blocked_dates.filter((x) => x !== d) }, `${fmtDay(d)} unblocked`)
                   }}
                 >
                   <span className={d < today ? 'text-neutral-400' : undefined}>{fmtDay(d)}</span>
@@ -617,48 +621,6 @@ export default function HoursPage() {
           )}
         </section>
       </div>
-
-      {/* Mobile: save bar slides up only when there is something to save */}
-      <div
-        aria-hidden={!isDirty && !saving}
-        className={`fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur transition-transform duration-200 ease-out md:hidden ${
-          isDirty || saving ? 'translate-y-0' : 'pointer-events-none translate-y-full'
-        }`}
-      >
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={discard}
-            disabled={saving}
-            className={`${btnGhost} flex h-11 flex-none items-center justify-center gap-1.5 px-4 disabled:opacity-50`}
-          >
-            <RotateCcw size={15} strokeWidth={1.75} />
-            Discard
-          </button>
-          <button
-            form="hours-form"
-            className={`${btn} flex h-11 flex-1 items-center justify-center gap-1.5`}
-            disabled={saving || !isDirty}
-          >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} strokeWidth={1.75} />}
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile: transient confirmation, since the save bar itself slides away on success */}
-      {saved && (
-        <div
-          role="status"
-          className="fixed inset-x-0 bottom-[calc(1.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center px-4 md:hidden"
-        >
-          <span className="flex items-center gap-1.5 rounded-full bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
-            <Check size={16} strokeWidth={2.5} />
-            Hours saved
-          </span>
-        </div>
-      )}
 
       {copyFor && values.hours[copyFor.key] && (
         <Modal onClose={() => setCopyFor(null)} titleId="copy-hours-title" title={`Copy ${copyFor.label}`}>

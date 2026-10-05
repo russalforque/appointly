@@ -65,7 +65,7 @@ export default function AuthLayout({
         <div className="mx-auto w-full max-w-sm">
           <Link
             to="/"
-            className="inline-flex items-center gap-1.5 rounded text-sm font-medium text-slate-500 outline-none transition-colors hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+            className="-ml-1 inline-flex min-h-10 items-center gap-1.5 rounded px-1 text-sm font-medium text-slate-500 outline-none transition-colors hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
           >
             <ArrowLeft size={16} />
             Back to home

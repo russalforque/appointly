@@ -3,8 +3,10 @@ import { ChevronDown } from 'lucide-react'
 
 const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
   ({ className = '', ...props }, ref) => (
-    <div className="relative">
-      <select ref={ref} {...props} className={`cursor-pointer appearance-none !pr-8 ${className}`} />
+    // min-w-0/max-w-full let it shrink inside a flex row: a native <select> is as wide as its
+    // longest option, so one long staff name used to push the page sideways on a phone.
+    <div className="relative min-w-0 max-w-full">
+      <select ref={ref} {...props} className={`max-w-full cursor-pointer appearance-none !pr-8 ${className}`} />
       <ChevronDown
         size={15}
         strokeWidth={1.75}

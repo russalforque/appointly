@@ -13,7 +13,9 @@ import {
   Menu,
   X,
 } from 'lucide-react'
-import { fetchPlans, fmtMoney } from '../lib/billing'
+import { fetchPlans } from '../lib/billing'
+import { RECOMMENDED_PLAN_ID } from '../lib/plans'
+import { PlanCards } from '../components/PlanCards'
 import { useLoad } from '../lib/useLoad'
 import { usePageMeta } from '../lib/usePageMeta'
 import Logo from '../components/Logo'
@@ -128,8 +130,6 @@ export default function Landing() {
     description:
       'An online booking platform for service businesses to manage appointments, services, staff, schedules, and customers in one place.',
   })
-
-  const popularPlanId = plans && plans.length > 1 ? plans[1].id : null
 
   return (
     <div className="font-site min-h-screen bg-white text-slate-900">
@@ -356,46 +356,24 @@ export default function Landing() {
             </Reveal>
 
             {plans && (
-              <Reveal delay={100} className="mx-auto mt-10 grid max-w-3xl gap-5 sm:mt-12 sm:grid-cols-2 sm:gap-6 lg:mt-14">
-                {plans.map((plan) => {
-                  const popular = plan.id === popularPlanId
-                  return (
-                    <div
-                      key={plan.id}
-                      className={`relative flex flex-col rounded-2xl border bg-white p-5 sm:p-6 lg:p-8 ${
-                        popular ? 'border-slate-900' : 'border-slate-200'
-                      }`}
+              <Reveal delay={100} className="mx-auto mt-10 max-w-3xl sm:mt-12 lg:mt-14">
+                <PlanCards
+                  plans={plans}
+                  action={(plan) => (
+                    <Link
+                      to="/register"
+                      className={`w-full ${plan.id === RECOMMENDED_PLAN_ID ? BTN_PRIMARY : BTN_SECONDARY}`}
+                      aria-label={`Start your free trial on the ${plan.name} plan`}
                     >
-                      {popular && (
-                        <span className="absolute -top-2.5 left-5 rounded-full bg-slate-900 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-white sm:left-6 lg:left-8">
-                          Most popular
-                        </span>
-                      )}
-                      <h3 className="text-[15px] font-semibold text-slate-900">{plan.name}</h3>
-                      <p className="mt-4 flex flex-wrap items-baseline gap-x-1.5">
-                        <span className="text-3xl font-semibold tracking-tight text-slate-900 wrap-break-word sm:text-4xl">
-                          {fmtMoney(plan.price_cents, plan.currency)}
-                        </span>
-                        <span className="text-sm text-slate-500">/ {plan.interval}</span>
-                      </p>
-                      <ul className="mt-6 flex-1 space-y-3 text-[15px] text-slate-600">
-                        {plan.features.map((f) => (
-                          <li key={f} className="flex items-start gap-2.5">
-                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" aria-hidden="true" />
-                            <span className="min-w-0 wrap-break-word">{f}</span>
-                          </li>
-                        ))}
-                      </ul>
-                      <Link
-                        to="/register"
-                        className={`mt-7 w-full sm:mt-8 ${popular ? BTN_PRIMARY : BTN_SECONDARY}`}
-                        aria-label={`Start your free trial on the ${plan.name} plan`}
-                      >
-                        Start free trial
-                      </Link>
-                    </div>
-                  )
-                })}
+                      Start free trial
+                    </Link>
+                  )}
+                />
+                <p className="mt-6 text-center text-sm text-slate-600">
+                  <Link to="/pricing" className="font-semibold text-slate-900 underline underline-offset-4 hover:text-brand-700">
+                    Compare every feature
+                  </Link>
+                </p>
               </Reveal>
             )}
 

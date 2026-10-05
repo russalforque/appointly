@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis } from 'recharts'
 import {
@@ -18,32 +18,24 @@ import {
 import { fetchBookings } from '../../lib/booking'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
-import { addDays, dayKey, fmtDay, fmtPeso, fmtTime, paddedRange, todayIn } from '../../lib/format'
+import { addDays, dayKey, fmtPeso, paddedRange, relativeDay, todayIn } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
-import { btnPrimary, panel } from '../../lib/ui'
+import { useMediaQuery } from '../../lib/useMediaQuery'
+import { actionPrimary, actionSecondary, btnPrimary, panel } from '../../lib/ui'
 import type { BookingRow, BusinessSettings } from '../../lib/types'
-import { ErrorText } from '../../components/Status'
-import NotificationBell from '../../components/NotificationBell'
-import { StatusBadge } from './BookingParts'
+import { EmptyState, ErrorState } from '../../components/Status'
+import Fab from '../../components/Fab'
+import { BookingDetailsSheet, BookingListItem } from './BookingParts'
+import { PlanBadge } from '../../components/UpgradeNotice'
+import { billingState, fmtDate } from '../../lib/billing'
 import { useBusiness } from './useBusiness'
 
 const SERIES_DAYS = 30
+/** How close to the end of a plan or trial the home page starts mentioning it. */
+const RENEW_NOTICE_DAYS = 5
 /** Desktop shows more of today because the panel sits beside a short rail — mobile stays at 4. */
 const TODAY_VISIBLE = 4
 const TODAY_VISIBLE_WIDE = 6
-
-/** Presentational only: lets the row count follow the breakpoint the layout already uses. */
-function useMinWidth(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const mq = window.matchMedia(query)
-    const sync = () => setMatches(mq.matches)
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [query])
-  return matches
-}
 
 type DaySeries = { date: string; count: number; revenue: number }
 /** 'Today' was dropped: one data point draws no line, and the KPI row above already covers it. */
@@ -79,69 +71,7 @@ function seriesForPeriod(series: DaySeries[], period: Period): { label: string; 
   return chunks
 }
 
-const ACCENT: Partial<Record<BookingRow['status'], string>> = {
-  pending: 'bg-amber-400',
-  confirmed: 'bg-brand-500',
-}
-
-function BookingRowItem({ b, tz, detailed = false }: { b: BookingRow; tz: string; detailed?: boolean }) {
-  const price = b.services?.price
-  return (
-    <li>
-      {/* The whole row opens Bookings — a 30px "View" link hidden below sm was unreachable on a phone */}
-      <Link
-        to="/dashboard/bookings"
-        className={`-mx-2 flex items-center gap-2 rounded-lg px-2 py-2.5 outline-none transition-colors hover:bg-neutral-50 active:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-brand-600 sm:gap-3 ${
-          detailed ? 'xl:gap-4 xl:px-3 xl:py-3' : ''
-        }`}
-      >
-        <span
-          className={`h-9 w-1 shrink-0 rounded-full ${ACCENT[b.status] ?? 'bg-neutral-200'} ${detailed ? 'xl:h-10' : ''}`}
-          aria-hidden="true"
-        />
-        <span className="w-12 shrink-0 text-sm font-semibold tabular-nums text-neutral-900 sm:w-16">{fmtTime(b.start_at, tz)}</span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-neutral-900">{b.customers?.name}</span>
-          <span className="block truncate text-xs text-neutral-500">{b.services?.name}</span>
-        </span>
-        {/* Wide panels have room for the columns a phone has to hide */}
-        {detailed && (
-          <>
-            <span className="hidden min-w-0 shrink-0 basis-32 truncate text-sm text-neutral-500 2xl:block">
-              {b.staff?.name ?? '—'}
-            </span>
-            <span className="hidden w-20 shrink-0 text-right text-sm font-medium tabular-nums text-neutral-700 2xl:block">
-              {price != null ? fmtPeso(price) : '—'}
-            </span>
-          </>
-        )}
-        <span className={`flex shrink-0 items-center gap-1 sm:gap-1.5 ${detailed ? '2xl:w-28 2xl:justify-end' : ''}`}>
-          <StatusBadge status={b.status} />
-          <ChevronRight size={15} strokeWidth={1.75} className="text-neutral-300" aria-hidden="true" />
-        </span>
-      </Link>
-    </li>
-  )
-}
-
-function DayGroup({ label, rows, tz }: { label: string; rows: BookingRow[]; tz: string }) {
-  return (
-    <div>
-      <p className="sticky top-0 -mx-5 bg-white px-5 py-1.5 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        {label}
-      </p>
-      <ul className="divide-y divide-neutral-100">
-        {rows.map((b) => (
-          <BookingRowItem key={b.id} b={b} tz={tz} />
-        ))}
-      </ul>
-    </div>
-  )
-}
-
 function groupByDay(rows: BookingRow[], tz: string) {
-  const today = todayIn(tz)
-  const tomorrow = addDays(today, 1)
   const order: string[] = []
   const groups = new Map<string, BookingRow[]>()
   for (const b of rows) {
@@ -152,49 +82,12 @@ function groupByDay(rows: BookingRow[], tz: string) {
     }
     groups.get(key)!.push(b)
   }
-  return order.map((key) => ({
-    key,
-    label: key === today ? 'Today' : key === tomorrow ? 'Tomorrow' : fmtDay(key),
-    rows: groups.get(key)!,
-  }))
+  return order.map((key) => ({ key, rows: groups.get(key)! }))
 }
 
 function SectionCount({ count }: { count: number }) {
   if (count === 0) return null
   return <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-500">{count}</span>
-}
-
-type EmptyAction = { label: string; to: string; external?: boolean; icon?: LucideIcon }
-
-function EmptyState({ title, body, actions }: { title: string; body: string; actions?: EmptyAction[] }) {
-  return (
-    <div className="flex flex-col items-center py-10 text-center lg:py-14">
-      <p className="text-sm font-medium text-neutral-900">{title}</p>
-      <p className="mt-1 max-w-xs text-sm text-neutral-500 sm:max-w-sm">{body}</p>
-      {actions && actions.length > 0 && (
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-          {actions.map((a, i) => {
-            const cls =
-              i === 0
-                ? 'inline-flex h-11 items-center gap-1.5 rounded-lg bg-brand-600 px-4 text-sm font-medium text-white shadow-sm shadow-brand-600/25 hover:bg-brand-700 sm:h-9'
-                : 'inline-flex h-11 items-center gap-1.5 rounded-lg border border-neutral-300 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 sm:h-9'
-            const Icon = a.icon
-            return a.external ? (
-              <a key={a.label} href={a.to} target="_blank" rel="noreferrer" className={cls}>
-                {Icon && <Icon size={14} strokeWidth={1.75} />}
-                {a.label}
-              </a>
-            ) : (
-              <Link key={a.label} to={a.to} className={cls}>
-                {Icon && <Icon size={14} strokeWidth={1.75} />}
-                {a.label}
-              </Link>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function Trend({ value, format }: { value: number; format?: (n: number) => string }) {
@@ -217,6 +110,10 @@ const KPI_TINTS = {
   violet: 'bg-violet-50 text-violet-600',
 } as const
 
+/**
+ * Phones: one cell of a single 2×2 stats surface (four bordered cards were a screen of chrome).
+ * Desktop: its own card. With `to`, the cell is a shortcut — "3 awaiting" goes straight to them.
+ */
 function KpiCard({
   icon: Icon,
   label,
@@ -224,26 +121,57 @@ function KpiCard({
   trend,
   hint,
   tint,
+  to,
+  attention = false,
+  shortLabel,
 }: {
   icon: LucideIcon
   label: string
+  /** For a phone's half-width cell, where the full label would truncate. */
+  shortLabel?: string
   value: string | number
   trend?: ReactNode
   hint?: string
   tint: keyof typeof KPI_TINTS
+  to?: string
+  attention?: boolean
 }) {
-  return (
-    <div className={`${panel} p-4 transition-shadow sm:p-5 lg:hover:shadow-md lg:hover:shadow-neutral-900/6 xl:p-6`}>
+  const cls = `group relative block min-w-0 border-neutral-100 p-4 outline-none transition-colors odd:border-r [&:nth-child(-n+2)]:border-b focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600 sm:p-5 lg:rounded-2xl lg:border lg:border-neutral-200/70 lg:bg-white lg:shadow-sm lg:shadow-neutral-900/[0.04] xl:p-6 ${
+    to ? 'active:bg-neutral-50 lg:hover:shadow-md lg:hover:shadow-neutral-900/6' : ''
+  } ${attention ? 'bg-amber-50/60 lg:border-amber-200 lg:bg-amber-50/40' : ''}`
+  const body = (
+    <>
       <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-[11px] font-medium uppercase tracking-wide text-neutral-500 sm:text-xs">{label}</p>
+        <p className="truncate text-xs font-medium text-neutral-500 lg:uppercase lg:tracking-wide">
+          {shortLabel ? (
+            <>
+              <span className="2xl:hidden">{shortLabel}</span>
+              <span className="hidden 2xl:inline">{label}</span>
+            </>
+          ) : (
+            label
+          )}
+        </p>
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg xl:h-9 xl:w-9 ${KPI_TINTS[tint]}`}>
           <Icon size={14} strokeWidth={1.75} />
         </span>
       </div>
-      <p className="mt-2 text-xl font-semibold tabular-nums text-neutral-900 sm:text-2xl xl:mt-3 xl:text-[28px]">{value}</p>
+      <p className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight text-neutral-900 xl:mt-3 xl:text-[28px]">{value}</p>
       {trend}
-      {hint && !trend && <p className="mt-1.5 text-xs text-neutral-400">{hint}</p>}
-    </div>
+      {hint && !trend && (
+        <p className={`mt-1 flex items-center gap-0.5 text-xs ${attention ? 'font-medium text-amber-700' : 'text-neutral-400'}`}>
+          {hint}
+          {to && <ChevronRight size={13} strokeWidth={2} aria-hidden />}
+        </p>
+      )}
+    </>
+  )
+  return to ? (
+    <Link to={to} className={cls}>
+      {body}
+    </Link>
+  ) : (
+    <div className={cls}>{body}</div>
   )
 }
 
@@ -327,7 +255,7 @@ function ActivityChart({ series }: { series: DaySeries[] }) {
         <div
           className="h-48 sm:h-56 lg:mt-5 lg:h-64 xl:h-72 2xl:h-80"
           role="img"
-          aria-label={bars.map((b) => `${b.label}: ${metric === 'bookings' ? `${b.count} booking${b.count === 1 ? '' : 's'}` : `$${b.revenue.toFixed(2)}`}`).join(', ')}
+          aria-label={bars.map((b) => `${b.label}: ${metric === 'bookings' ? `${b.count} booking${b.count === 1 ? '' : 's'}` : fmtPeso(b.revenue)}`).join(', ')}
         >
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={bars} margin={{ top: 8, right: 4, left: 4, bottom: 0 }}>
@@ -387,19 +315,20 @@ function DashboardSkeleton() {
         ))}
       </div>
       {/* Mirrors the loaded layout: schedule + rail, then a full-width chart */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
-        <div className={`${panel} h-72 xl:col-span-2`} />
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+        <div className={`${panel} h-72 2xl:col-span-2`} />
         <div className={`${panel} h-72`} />
-        <div className={`${panel} h-72 lg:col-span-2 xl:col-span-3 xl:h-96`} />
+        <div className={`${panel} h-72 lg:col-span-2 xl:h-96 2xl:col-span-3`} />
       </div>
     </div>
   )
 }
 
 export default function DashboardHome() {
-  const { business, timezone, can } = useBusiness()
+  const { business, timezone, can, billing } = useBusiness()
+  const analytics = can.analytics
   const siteUrl = `${window.location.origin}/book/${business.slug}`
-  const wide = useMinWidth('(min-width: 1280px)')
+  const wide = useMediaQuery('(min-width: 1280px)')
   const todayVisible = wide ? TODAY_VISIBLE_WIDE : TODAY_VISIBLE
 
   const load = useCallback(async () => {
@@ -407,14 +336,19 @@ export default function DashboardHome() {
     const yesterday = addDays(today, -1)
     const seriesStart = addDays(today, -(SERIES_DAYS - 1))
     const r = paddedRange(today, addDays(today, 1))
-    const week = paddedRange(today, addDays(today, 8))
+    // Starts at tomorrow's padded edge, not today's: the padding reached back into yesterday, whose
+    // unfinished bookings then showed as "upcoming", and today's rows could use up the limit.
+    const week = paddedRange(addDays(today, 1), addDays(today, 8))
     const seriesRange = paddedRange(seriesStart, addDays(today, 1))
     const [day, yesterdayRaw, pending, week7, seriesRaw, services, staff, settings] = await Promise.all([
       fetchBookings(business.id, r),
       fetchBookings(business.id, paddedRange(yesterday, today)),
       fetchBookings(business.id, { status: 'pending', from: new Date().toISOString(), limit: 20 }),
       fetchBookings(business.id, { from: week.from, to: week.to, limit: 40 }),
-      fetchBookings(business.id, { from: seriesRange.from, to: seriesRange.to, limit: 500 }),
+      // The 30-day series only feeds the trends chart, which is part of Reports & analytics.
+      analytics
+        ? fetchBookings(business.id, { from: seriesRange.from, to: seriesRange.to, limit: 500 })
+        : Promise.resolve([] as BookingRow[]),
       unwrap<{ id: string }[]>(supabase.from('services').select('id').eq('business_id', business.id).eq('is_active', true)),
       unwrap<{ id: string }[]>(supabase.from('staff').select('id').eq('business_id', business.id).eq('is_active', true)),
       unwrap<Pick<BusinessSettings, 'working_hours'>>(
@@ -424,7 +358,7 @@ export default function DashboardHome() {
     const todays = day.filter((b) => dayKey(b.start_at, timezone) === today && b.status !== 'cancelled')
     const yesterdays = yesterdayRaw.filter((b) => dayKey(b.start_at, timezone) === yesterday && b.status !== 'cancelled')
     const upcoming = week7
-      .filter((b) => dayKey(b.start_at, timezone) !== today && b.status !== 'cancelled' && b.status !== 'completed')
+      .filter((b) => dayKey(b.start_at, timezone) > today && (b.status === 'pending' || b.status === 'confirmed'))
       .slice(0, 5)
     const revenueOf = (rows: BookingRow[]) =>
       rows.filter((b) => b.status === 'completed').reduce((sum, b) => sum + (b.services?.price ?? 0), 0)
@@ -451,11 +385,12 @@ export default function DashboardHome() {
       staffCount: staff.length,
       hoursSet,
     }
-  }, [business.id, timezone])
-  const { data, loading, error } = useLoad(load)
+  }, [business.id, timezone, analytics])
+  const { data, loading, error, reload } = useLoad(load)
+  const [active, setActive] = useState<BookingRow | null>(null)
 
   if (loading) return <DashboardSkeleton />
-  if (error || !data) return <ErrorText message={error} />
+  if (error || !data) return <ErrorState message={error} onRetry={reload} />
 
   const dateLabel = new Intl.DateTimeFormat(undefined, {
     timeZone: timezone,
@@ -463,6 +398,7 @@ export default function DashboardHome() {
     month: 'long',
     day: 'numeric',
   }).format(new Date())
+  const today = todayIn(timezone)
 
   const setupItems = [
     { done: Boolean(business.description && business.phone), label: 'Complete your business profile', to: '/dashboard/profile' },
@@ -470,25 +406,38 @@ export default function DashboardHome() {
     { done: data.servicesCount > 0, label: 'Add at least one service', to: '/dashboard/services' },
     { done: data.staffCount > 0, label: 'Add at least one staff member', to: '/dashboard/staff' },
   ]
+  const plan = billingState(billing.subscription, billing.plans)
+  const ending =
+    plan.kind === 'active' && !plan.cancelling && plan.endsAt && plan.daysLeft !== null && plan.daysLeft <= RENEW_NOTICE_DAYS
+      ? {
+          title: `Your ${plan.plan?.name ?? ''} plan ends ${plan.daysLeft <= 1 ? 'tomorrow' : `in ${plan.daysLeft} days`}.`,
+          body: `Renew by ${fmtDate(plan.endsAt)} to keep your dashboard unlocked — nothing is charged automatically.`,
+          cta: 'Renew plan',
+        }
+      : plan.kind === 'trial' && plan.daysLeft !== null && plan.daysLeft <= RENEW_NOTICE_DAYS
+        ? {
+            title: `Your free trial ends ${plan.daysLeft <= 1 ? 'tomorrow' : `in ${plan.daysLeft} days`}.`,
+            body: 'Choose a plan to keep taking bookings without interruption.',
+            cta: 'Choose a plan',
+          }
+        : null
   const setupDone = setupItems.filter((i) => i.done).length
   const setupPct = Math.round((setupDone / setupItems.length) * 100)
+  const sectionLink =
+    '-mr-2 flex h-11 flex-none items-center gap-0.5 rounded-lg px-2 text-sm font-medium text-brand-600 outline-none transition-colors hover:text-brand-700 focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-9 sm:text-neutral-500 sm:hover:text-neutral-900'
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:space-y-8 sm:pb-0 xl:max-w-360 2xl:max-w-400">
+    <div className="mx-auto max-w-6xl space-y-5 sm:space-y-8 xl:max-w-360 2xl:max-w-400">
       <div className="flex flex-wrap items-start justify-between gap-4 lg:items-center lg:border-b lg:border-neutral-200/80 lg:pb-6">
         <div className="min-w-0 flex-1">
-          <p className="text-xs text-neutral-500 sm:text-[13px]">{dateLabel}</p>
-          <h1 className="mt-1 text-xl font-semibold leading-snug tracking-tight text-neutral-900 sm:text-2xl sm:leading-normal lg:text-[28px] xl:text-3xl">
-            {greetingIn(timezone)}, {business.name}
+          <p className="text-xs font-medium text-neutral-500 sm:text-[13px]">{dateLabel}</p>
+          <h1 className="mt-0.5 text-[22px] font-semibold leading-snug tracking-tight text-neutral-900 sm:mt-1 sm:text-2xl sm:leading-normal lg:text-[28px] xl:text-3xl">
+            {greetingIn(timezone)}
+            <span className="hidden sm:inline">, {business.name}</span>
           </h1>
-          <p className="mt-1 text-sm text-neutral-500">Here's what's happening with your bookings today.</p>
+          <p className="mt-1 hidden text-sm text-neutral-500 sm:block">Here's what's happening with your bookings today.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2 lg:gap-3">
-          {can.notifications && (
-            <div className="hidden sm:block">
-              <NotificationBell businessId={business.id} timezone={timezone} />
-            </div>
-          )}
           {/* Desktop has room for the secondary action the phone header cannot fit */}
           <a
             href={siteUrl}
@@ -508,21 +457,23 @@ export default function DashboardHome() {
         </div>
       </div>
 
-      {/* Mobile floating action button */}
-      <a
-        href={siteUrl}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Add booking"
-        className="fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 outline-none transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:hidden"
-      >
-        <Plus size={24} strokeWidth={2} />
-      </a>
+      {/* Only in the last few days of a plan or trial, and never once the owner has chosen to let it end */}
+      {ending && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3.5 text-sm text-amber-800 sm:flex-row sm:items-center">
+          <CalendarClock size={18} strokeWidth={1.75} className="hidden shrink-0 sm:block" aria-hidden />
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold">{ending.title}</span> {ending.body}
+          </p>
+          <Link to="/dashboard/billing" className={`${actionSecondary} flex-none`}>
+            {ending.cta}
+          </Link>
+        </div>
+      )}
 
       {/* Setup comes first while it is unfinished: an empty dashboard's KPIs are all zero, and
           nothing else on this page works until these four things exist. */}
       {setupDone < setupItems.length && (
-        <section className="rounded-2xl border border-brand-200/70 bg-brand-50/50 p-4 shadow-sm shadow-neutral-900/[0.04] sm:p-5 xl:p-6">
+        <section className="rounded-2xl border border-brand-200/70 bg-brand-50/50 p-4 shadow-sm shadow-neutral-900/4 sm:p-5 xl:p-6">
           <div className="flex items-center justify-between gap-3 lg:gap-6">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-neutral-900 lg:text-base">Finish setting up</p>
@@ -551,7 +502,7 @@ export default function DashboardHome() {
               <li key={item.label}>
                 <Link
                   to={item.to}
-                  className={`flex items-center gap-2.5 rounded-xl px-2 py-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 lg:h-full lg:border lg:border-white/80 lg:bg-white/60 lg:px-3 lg:py-3 ${
+                  className={`flex min-h-11 items-center gap-2.5 rounded-xl px-2 py-2.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 lg:h-full lg:border lg:border-white/80 lg:bg-white/60 lg:px-3 lg:py-3 ${
                     item.done ? 'text-neutral-500' : 'font-medium text-neutral-900 hover:bg-white/70 active:bg-white lg:hover:bg-white'
                   }`}
                 >
@@ -571,8 +522,8 @@ export default function DashboardHome() {
         </section>
       )}
 
-      {/* Key statistics */}
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 xl:gap-5">
+      {/* Key statistics: one surface on phones, four cards from lg */}
+      <div className="grid grid-cols-2 overflow-hidden rounded-2xl border border-neutral-200/70 bg-white shadow-sm shadow-neutral-900/4 lg:grid-cols-4 lg:gap-4 lg:overflow-visible lg:rounded-none lg:border-0 lg:bg-transparent lg:shadow-none xl:gap-5">
         <KpiCard
           icon={CalendarCheck}
           label="Today's bookings"
@@ -583,9 +534,12 @@ export default function DashboardHome() {
         <KpiCard
           icon={Clock3}
           label="Awaiting confirmation"
+          shortLabel="To confirm"
           value={data.pending.length}
-          hint={data.pending.length > 0 ? 'Needs your review' : 'All caught up'}
+          hint={data.pending.length > 0 ? 'Review now' : 'All caught up'}
           tint="amber"
+          to={data.pending.length > 0 ? '/dashboard/bookings?status=pending' : undefined}
+          attention={data.pending.length > 0}
         />
         <KpiCard
           icon={CircleCheck}
@@ -605,94 +559,129 @@ export default function DashboardHome() {
 
       {/* Today's schedule & upcoming bookings */}
       {/* One grid holds all three panels so wide screens can rearrange them without reordering the DOM */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start xl:grid-cols-3 xl:gap-6">
-        <section className={`${panel} xl:col-span-2 xl:p-6`}>
-          <div className="mb-1 flex items-center justify-between xl:mb-2">
-            <h2 className="flex items-center gap-2 text-[18px] font-semibold text-neutral-900">
-              <CalendarCheck size={18} strokeWidth={1.75} className="text-neutral-400" />
+      <div className="grid grid-cols-1 gap-5 sm:gap-6 lg:grid-cols-2 lg:items-start 2xl:grid-cols-3">
+        <section className={`${panel} overflow-hidden !p-0 2xl:col-span-2`}>
+          <div className="flex items-center justify-between px-4 pb-1 pt-3.5 sm:px-5 sm:pt-5 xl:px-6">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-neutral-900 sm:text-[18px]">
+              <CalendarCheck size={18} strokeWidth={1.75} className="hidden text-neutral-400 sm:block" />
               Today's schedule
               <SectionCount count={data.today.length} />
             </h2>
-            <Link
-              to="/dashboard/calendar"
-              className="-mr-2 flex h-11 flex-none items-center gap-0.5 rounded-lg px-2 text-sm font-medium text-neutral-500 outline-none transition-colors hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-9"
-            >
+            <Link to="/dashboard/calendar" className={sectionLink}>
               Calendar
               <ChevronRight size={15} strokeWidth={1.75} />
             </Link>
           </div>
           {data.today.length === 0 ? (
             <EmptyState
+              icon={CalendarCheck}
               title="No appointments today"
-              body="Your schedule is clear for today."
-              actions={[
-                { label: 'Create booking', to: siteUrl, external: true, icon: Plus },
-                { label: 'View calendar', to: '/dashboard/calendar' },
-              ]}
+              body="Your schedule is clear. Share your booking page to fill it."
+              action={
+                <Link to="/dashboard/calendar" className={actionSecondary}>
+                  View calendar
+                </Link>
+              }
             />
           ) : (
             <>
-              {/* Column captions only appear once the extra columns do */}
-              <div className="hidden items-center gap-4 border-b border-neutral-100 px-1 pb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400 2xl:flex">
-                <span className="w-1 shrink-0" aria-hidden="true" />
-                <span className="w-16 shrink-0">Time</span>
-                <span className="min-w-0 flex-1">Customer &amp; service</span>
-                <span className="shrink-0 basis-32">Staff</span>
-                <span className="w-20 shrink-0 text-right">Price</span>
-                <span className="w-28 shrink-0 text-right">Status</span>
-              </div>
-              <ul className="divide-y divide-neutral-100">
+              <ul className="divide-y divide-neutral-100 pb-1 sm:pb-2">
                 {data.today.slice(0, todayVisible).map((b) => (
-                  <BookingRowItem key={b.id} b={b} tz={timezone} detailed />
+                  <BookingListItem key={b.id} booking={b} timezone={timezone} onSelect={setActive} showPrice />
                 ))}
               </ul>
               {data.today.length > todayVisible && (
                 <Link
                   to="/dashboard/calendar"
-                  className="mt-2 flex h-11 items-center justify-center rounded-xl bg-neutral-50 text-sm font-medium text-neutral-600 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 xl:mt-3"
+                  className="flex h-12 items-center justify-center border-t border-neutral-100 text-sm font-medium text-brand-600 outline-none transition-colors hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600"
                 >
-                  +{data.today.length - todayVisible} more today
+                  See all {data.today.length} today
                 </Link>
               )}
             </>
           )}
         </section>
 
-        <section className={`${panel} xl:self-start`}>
-          <div className="mb-1 flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-[18px] font-semibold text-neutral-900">
-              <CalendarClock size={18} strokeWidth={1.75} className="text-neutral-400" />
-              Upcoming bookings
+        <section className={`${panel} overflow-hidden !p-0 xl:self-start`}>
+          <div className="flex items-center justify-between px-4 pb-1 pt-3.5 sm:px-5 sm:pt-5">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-neutral-900 sm:text-[18px]">
+              <CalendarClock size={18} strokeWidth={1.75} className="hidden text-neutral-400 sm:block" />
+              Coming up
               <SectionCount count={data.upcoming.length} />
             </h2>
-            <Link
-              to="/dashboard/bookings"
-              className="-mr-2 flex h-11 flex-none items-center gap-0.5 rounded-lg px-2 text-sm font-medium text-neutral-500 outline-none transition-colors hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-9"
-            >
+            <Link to="/dashboard/bookings" className={sectionLink}>
               All
               <ChevronRight size={15} strokeWidth={1.75} />
             </Link>
           </div>
           {data.upcoming.length === 0 ? (
             <EmptyState
-              title="No upcoming bookings"
-              body="Once customers start booking, you'll see appointments here."
-              actions={[{ label: 'View booking page', to: siteUrl, external: true, icon: Globe2 }]}
+              icon={CalendarClock}
+              title="Nothing booked this week"
+              body="Once customers start booking, upcoming appointments show up here."
+              action={
+                <a href={siteUrl} target="_blank" rel="noreferrer" className={actionPrimary}>
+                  <Globe2 size={15} strokeWidth={2} /> Open booking page
+                </a>
+              }
             />
           ) : (
-            <div className="space-y-1">
+            <div className="pb-1 sm:pb-2">
               {groupByDay(data.upcoming, timezone).map((group) => (
-                <DayGroup key={group.key} label={group.label} rows={group.rows} tz={timezone} />
+                <div key={group.key}>
+                  <p className="px-4 pb-0.5 pt-2.5 text-xs font-semibold text-neutral-400 sm:px-5">{relativeDay(group.key, today)}</p>
+                  <ul className="divide-y divide-neutral-100">
+                    {group.rows.map((b) => (
+                      <BookingListItem key={b.id} booking={b} timezone={timezone} onSelect={setActive} />
+                    ))}
+                  </ul>
+                </div>
               ))}
             </div>
           )}
         </section>
 
-        {/* Bookings & revenue overview — trends matter less than today's work, so they sit below it */}
-        <div className="lg:col-span-2 xl:col-span-3">
-          <ActivityChart series={data.series} />
+        {/* Bookings & revenue overview — trends matter less than today's work, so they sit below it.
+            Trends are part of Reports & analytics; other plans get one quiet line pointing there. */}
+        <div className="lg:col-span-2 2xl:col-span-3">
+          {can.analytics ? (
+            <ActivityChart series={data.series} />
+          ) : (
+            <Link
+              to="/dashboard/reports"
+              className={`${panel} group flex items-center gap-3 outline-none transition-colors hover:border-brand-200 focus-visible:ring-2 focus-visible:ring-brand-600`}
+            >
+              <span className="flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                <BarChart3 size={18} strokeWidth={1.75} aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-neutral-900">
+                  Booking & revenue trends <PlanBadge />
+                </span>
+                <span className="mt-0.5 block text-sm text-neutral-500">
+                  See how bookings, revenue, services and staff are trending over time.
+                </span>
+              </span>
+              <ChevronRight size={16} className="flex-none text-neutral-400 transition-transform group-hover:translate-x-0.5" aria-hidden />
+            </Link>
+          )}
         </div>
       </div>
+
+      {active && (
+        <BookingDetailsSheet
+          booking={active}
+          timezone={timezone}
+          onClose={() => setActive(null)}
+          onChanged={() => {
+            reload()
+            setActive(null)
+          }}
+        />
+      )}
+
+      <Fab label="Add booking" href={siteUrl} />
+      <div aria-hidden className="h-16 sm:hidden" />
     </div>
   )
 }

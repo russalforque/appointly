@@ -165,7 +165,7 @@ function ManagePlanDialog({
                   key={p.label}
                   type="button"
                   onClick={() => setEndDate(dateInputValue(p.months))}
-                  className="rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 outline-none transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
+                  className="h-9 rounded-full border border-neutral-200 px-3 text-xs font-medium text-neutral-600 outline-none transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
                 >
                   {p.label}
                 </button>
@@ -274,27 +274,28 @@ export default function AdminBusinessesPage() {
         </div>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className={`${panel} hidden !p-0 md:block`}>
+          {/* Desktop table (lg+). Owner and bookings wait for xl — at lg the owner's email
+              rides under the business name instead — and below lg the cards carry everything. */}
+          <div className={`${panel} hidden overflow-hidden !p-0 lg:block`}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-100 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   <th className="px-4 py-3">Business</th>
-                  <th className="px-4 py-3">Owner</th>
+                  <th className="hidden px-4 py-3 xl:table-cell">Owner</th>
                   <th className="px-4 py-3">Plan</th>
                   <th className="px-4 py-3">Subscription</th>
                   <th className="px-4 py-3">Renews / ends</th>
-                  <th className="px-4 py-3">Joined</th>
-                  <th className="px-4 py-3 text-right">Bookings</th>
+                  <th className="hidden px-4 py-3 text-right xl:table-cell">Bookings</th>
                   <th className="px-4 py-3 text-right">Plan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {rows.map((b) => (
                   <tr key={b.id}>
-                    <td className="max-w-56 px-4 py-3">
-                      <p className="flex items-center gap-1.5 truncate font-medium text-neutral-900">
-                        {b.name}
+                    {/* max-w on a <td> is ignored by auto table layout, so the clamp sits on the content */}
+                    <td className="px-4 py-3">
+                      <p className="flex max-w-56 items-center gap-1.5 font-medium text-neutral-900" title={b.name}>
+                        <span className="min-w-0 truncate">{b.name}</span>
                         {!b.is_active && (
                           <span className="shrink-0 rounded-full border border-neutral-200 bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-neutral-500">
                             Off
@@ -310,18 +311,22 @@ export default function AdminBusinessesPage() {
                         /{b.slug}
                         <ExternalLink size={11} strokeWidth={1.75} />
                       </a>
+                      <p className="max-w-56 truncate text-xs text-neutral-500 xl:hidden">{b.owner_email ?? '—'}</p>
+                      {/* Joined rides here rather than in an eighth column, which never fits the admin max width */}
+                      <p className="text-xs text-neutral-400">Joined {fmtDate(b.created_at)}</p>
                     </td>
-                    <td className="max-w-56 px-4 py-3">
-                      <p className="truncate text-neutral-900">{b.owner_name ?? '—'}</p>
-                      <p className="truncate text-xs text-neutral-500">{b.owner_email ?? '—'}</p>
+                    <td className="hidden px-4 py-3 xl:table-cell">
+                      <p className="max-w-52 truncate text-neutral-900">{b.owner_name ?? '—'}</p>
+                      <p className="max-w-52 truncate text-xs text-neutral-500" title={b.owner_email ?? undefined}>
+                        {b.owner_email ?? '—'}
+                      </p>
                     </td>
                     <td className="px-4 py-3 text-neutral-700">{b.plan_name ?? '—'}</td>
                     <td className="px-4 py-3">
                       <SubPill business={b} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-neutral-600">{renewal(b)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-600">{fmtDate(b.created_at)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-neutral-700">{b.booking_count}</td>
+                    <td className="hidden px-4 py-3 text-right tabular-nums text-neutral-700 xl:table-cell">{b.booking_count}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={() => setEditing(b)}
@@ -337,8 +342,8 @@ export default function AdminBusinessesPage() {
             </table>
           </div>
 
-          {/* Mobile cards — same data, no horizontal scrolling */}
-          <ul className="space-y-3 md:hidden">
+          {/* Mobile + tablet cards — same data, no horizontal scrolling */}
+          <ul className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:hidden">
             {rows.map((b) => (
               <li key={b.id} className={panel}>
                 <div className="flex items-start justify-between gap-3">

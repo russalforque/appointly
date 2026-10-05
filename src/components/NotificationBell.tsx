@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useId, useState, type ReactNode } from 'react'
-import { BadgeCheck, Bell, BellOff, CalendarCheck, CalendarX2, CheckCheck, CheckCircle2, Clock3, Receipt, XCircle, type LucideIcon } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { BadgeCheck, Bell, BellOff, CalendarCheck, CalendarX2, CheckCheck, CheckCircle2, ChevronRight, Clock3, Receipt, XCircle, type LucideIcon } from 'lucide-react'
 import { fetchNotifications, markAllNotificationsRead, markNotificationRead } from '../lib/notifications'
 import { supabase } from '../lib/supabase'
 import { useLoad } from '../lib/useLoad'
+import { useMediaQuery } from '../lib/useMediaQuery'
 import { fmtDateTime, fmtRelative } from '../lib/format'
 import type { AppNotification } from '../lib/types'
 import Modal from './Modal'
@@ -20,39 +22,44 @@ const KIND: Record<string, { icon: LucideIcon; tint: string }> = {
 }
 const FALLBACK_KIND = { icon: Bell, tint: 'bg-neutral-100 text-neutral-500' }
 
-/** Tracks a CSS media query so the panel can be a sheet on phones and a dropdown on desktop. */
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => (typeof window === 'undefined' ? false : window.matchMedia(query).matches))
-  useEffect(() => {
-    const mql = window.matchMedia(query)
-    const onChange = () => setMatches(mql.matches)
-    onChange()
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
-  }, [query])
-  return matches
+/** Where a notification leads when clicked; null when there is nothing to open. */
+function targetOf(n: AppNotification): string | null {
+  switch (n.type) {
+    case 'new_booking':
+    case 'booking_cancelled':
+    case 'reminder':
+      return n.booking_id ? `/dashboard/calendar?booking=${n.booking_id}` : '/dashboard/calendar'
+    case 'payment_submitted':
+    case 'payment_approved':
+    case 'payment_rejected':
+    case 'plan_updated':
+      return '/dashboard/billing'
+    default:
+      return null
+  }
 }
 
 function NotificationItem({
   notification,
   timezone,
-  onMarkRead,
+  onOpen,
 }: {
   notification: AppNotification
   timezone: string
-  onMarkRead: (id: string) => void
+  onOpen: (n: AppNotification) => void
 }) {
   const { icon: Icon, tint } = KIND[notification.type] ?? FALLBACK_KIND
   const unread = !notification.is_read
+  const linked = targetOf(notification) !== null
 
   return (
     <li>
-      {/* The whole row is the "mark read" target — a text link was a 40px-wide tap area */}
+      {/* The whole row is the target: opens what it is about (and marks it read) */}
       <button
         type="button"
-        disabled={!unread}
-        onClick={() => onMarkRead(notification.id)}
-        aria-label={unread ? `Mark "${notification.title}" as read` : undefined}
+        disabled={!unread && !linked}
+        onClick={() => onOpen(notification)}
+        aria-label={linked ? `Open "${notification.title}"` : `Mark "${notification.title}" as read`}
         className={`flex w-full items-start gap-3 px-3 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600 ${
           unread ? 'bg-brand-50/40 hover:bg-brand-50 active:bg-brand-100/60' : 'hover:bg-neutral-50'
         } disabled:hover:bg-transparent`}
@@ -75,6 +82,7 @@ function NotificationItem({
           <span className={`mt-0.5 block text-sm ${unread ? 'text-neutral-700' : 'text-neutral-500'}`}>{notification.message}</span>
         </span>
         {unread && <span className="mt-2 h-2 w-2 flex-none rounded-full bg-brand-600" aria-hidden="true" />}
+        {linked && <ChevronRight size={16} strokeWidth={1.75} className="mt-1.5 flex-none text-neutral-300" aria-hidden="true" />}
       </button>
     </li>
   )
@@ -84,12 +92,12 @@ function PanelBody({
   notifications,
   loading,
   timezone,
-  onMarkRead,
+  onOpen,
 }: {
   notifications: AppNotification[]
   loading: boolean
   timezone: string
-  onMarkRead: (id: string) => void
+  onOpen: (n: AppNotification) => void
 }) {
   if (loading && notifications.length === 0)
     return (
@@ -120,7 +128,7 @@ function PanelBody({
   return (
     <ul className="divide-y divide-neutral-100">
       {notifications.map((n) => (
-        <NotificationItem key={n.id} notification={n} timezone={timezone} onMarkRead={onMarkRead} />
+        <NotificationItem key={n.id} notification={n} timezone={timezone} onOpen={onOpen} />
       ))}
     </ul>
   )
@@ -140,6 +148,7 @@ export default function NotificationBell({
   align?: 'left' | 'right'
 }) {
   const [open, setOpen] = useState(false)
+  const navigate = useNavigate()
   const instanceId = useId()
   const isPhone = useMediaQuery('(max-width: 639px)')
   const load = useCallback(() => fetchNotifications(businessId), [businessId])
@@ -171,9 +180,13 @@ export default function NotificationBell({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, isPhone])
 
-  async function markRead(id: string) {
-    await markNotificationRead(id)
-    reload()
+  function openNotification(n: AppNotification) {
+    const to = targetOf(n)
+    if (!n.is_read) markNotificationRead(n.id).then(reload, () => {})
+    if (to) {
+      setOpen(false)
+      navigate(to)
+    }
   }
 
   async function markAllRead() {
@@ -197,7 +210,7 @@ export default function NotificationBell({
   )
 
   const body: ReactNode = (
-    <PanelBody notifications={notifications} loading={loading} timezone={timezone} onMarkRead={markRead} />
+    <PanelBody notifications={notifications} loading={loading} timezone={timezone} onOpen={openNotification} />
   )
 
   return (

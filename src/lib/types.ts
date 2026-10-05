@@ -11,7 +11,27 @@ export interface Business {
   logo_url: string | null
   cover_image_url: string | null
   accent_color: string | null
+  /** Whether the public booking page is live. Hidden pages are visible to members only. */
   is_active: boolean
+  tagline: string | null
+  website_url: string | null
+  city: string | null
+  region: string | null
+  postal_code: string | null
+  maps_url: string | null
+  facebook_url: string | null
+  instagram_url: string | null
+  tiktok_url: string | null
+  /** Visibility switches; get_public_business() blanks the hidden fields for visitors. */
+  show_phone: boolean
+  show_email: boolean
+  show_address: boolean
+  booking_instructions: string | null
+  confirmation_message: string | null
+  cancellation_policy: string | null
+  reschedule_policy: string | null
+  late_policy: string | null
+  no_show_policy: string | null
 }
 
 export type WorkingHours = Record<string, { start: string; end: string }[]>
@@ -28,6 +48,8 @@ export interface BusinessSettings {
   buffer_minutes: number
   allow_customer_cancellation: boolean
   cancellation_deadline_hours: number
+  reminders_enabled: boolean
+  reminder_hours: number
 }
 
 export interface Service {
@@ -99,7 +121,13 @@ export interface AppNotification {
 }
 
 /** Entitlement keys a plan unlocks; see plans.capabilities. */
-export type PlanCapability = 'notifications' | 'advanced_booking'
+export type PlanCapability =
+  | 'notifications'
+  | 'reminders'
+  | 'advanced_booking'
+  | 'booking_policies'
+  | 'staff_availability'
+  | 'analytics'
 
 export interface Plan {
   id: string
@@ -109,6 +137,8 @@ export interface Plan {
   interval: 'month' | 'year'
   features: string[]
   capabilities: PlanCapability[]
+  /** Active staff allowed at once; null means unlimited. */
+  max_staff: number | null
   is_active: boolean
   sort_order: number
 }
@@ -128,6 +158,8 @@ export interface Subscription {
   provider: 'paymongo' | 'xendit' | 'gotyme'
   checkout_ref: string | null
   payment_ref: string | null
+  /** The owner chose not to renew: the plan ends as cancelled at current_period_end. */
+  cancel_at_period_end: boolean
 }
 
 export interface Customer {

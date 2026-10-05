@@ -78,5 +78,7 @@ once you have signed in.
 
 The app is a static SPA. `vercel.json` sets the build command, the output directory, the
 history-API rewrite (so `/book/<slug>` resolves on a hard refresh) and the response headers.
+The Content-Security-Policy there allows API calls only to `*.supabase.co`; if the project moves
+to a Supabase custom domain, add it to `connect-src` or every request will be blocked.
 Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the host's environment settings; they are
 read at build time, so changing one needs a redeploy.

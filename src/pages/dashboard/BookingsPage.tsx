@@ -1,31 +1,35 @@
 import { useCallback, useMemo, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart3,
   CalendarDays,
   CheckCheck,
   CheckCircle2,
-  ChevronRight,
   Clock,
   Eye,
   Filter,
   Plus,
-  Search,
   SlidersHorizontal,
   User,
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { fetchBookings } from '../../lib/booking'
+import { bookingRef, fetchBookings } from '../../lib/booking'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
-import { fmtDateTime, fmtTime, initials, todayIn, dayKey } from '../../lib/format'
+import { dayKey, fmtDateTime, initials, relativeDay, todayIn } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
-import { btnPrimary, input, panel } from '../../lib/ui'
+import { actionPrimary, actionSecondary, input, panel } from '../../lib/ui'
 import type { BookingRow, BookingStatus, Service, Staff } from '../../lib/types'
-import { ErrorText, ListSkeleton, StatGridSkeleton } from '../../components/Status'
+import { EmptyState, ErrorState, ListSkeleton, StatGridSkeleton } from '../../components/Status'
 import Select from '../../components/Select'
 import Modal from '../../components/Modal'
-import { BookingActions, StatusBadge } from './BookingParts'
+import PageHeader from '../../components/PageHeader'
+import SearchField from '../../components/SearchField'
+import SegmentedTabs from '../../components/SegmentedTabs'
+import Fab from '../../components/Fab'
+import { BookingDetailsSheet, BookingListItem, StatusBadge } from './BookingParts'
+import { STATUS_ORDER } from './calendarModel'
 import { useBusiness } from './useBusiness'
 
 type DateFilter = 'all' | 'today' | 'upcoming' | 'past'
@@ -44,7 +48,7 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
       <button
         onClick={onRemove}
         aria-label={`Remove filter: ${label}`}
-        className="flex h-6 w-6 flex-none items-center justify-center rounded-full text-neutral-400 outline-none transition-colors hover:bg-neutral-200 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-900"
+        className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-neutral-400 outline-none transition-colors hover:bg-neutral-200 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-900"
       >
         <X size={12} strokeWidth={2.5} />
       </button>
@@ -52,67 +56,9 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
   )
 }
 
-function reference(token: string) {
-  return `#${token.slice(0, 8).toUpperCase()}`
-}
-
 function matches(b: BookingRow, q: string) {
-  const haystack = `${b.customers?.name ?? ''} ${b.customers?.email ?? ''} ${b.customers?.phone ?? ''} ${reference(b.public_token)}`
+  const haystack = `${b.customers?.name ?? ''} ${b.customers?.email ?? ''} ${b.customers?.phone ?? ''} ${bookingRef(b.public_token)}`
   return haystack.toLowerCase().includes(q.toLowerCase())
-}
-
-function BookingDetails({
-  booking,
-  timezone,
-  onClose,
-  onChanged,
-}: {
-  booking: BookingRow
-  timezone: string
-  onClose: () => void
-  onChanged: () => void
-}) {
-  const rows: [string, string | null][] = [
-    ['Reference', reference(booking.public_token)],
-    ['Customer', booking.customers?.name ?? '—'],
-    ['Phone', booking.customers?.phone ?? null],
-    ['Email', booking.customers?.email ?? null],
-    ['Service', booking.services?.name ?? '—'],
-    ['Staff', booking.staff ? [booking.staff.name, booking.staff.position].filter(Boolean).join(' · ') : 'Any available'],
-    ['Date', fmtDateTime(booking.start_at, timezone).split(',')[0]],
-    ['Start time', fmtTime(booking.start_at, timezone)],
-    ['End time', fmtTime(booking.end_at, timezone)],
-    ['Created', fmtDateTime(booking.created_at, timezone)],
-  ]
-
-  return (
-    <Modal onClose={onClose} title="Booking details" titleId="booking-details-title" maxWidth="max-w-md sm:max-w-xl">
-      <div className="mb-3">
-        <StatusBadge status={booking.status} />
-      </div>
-
-      <dl className="space-y-2.5 text-sm sm:grid sm:grid-cols-2 sm:gap-x-10 sm:gap-y-3 sm:space-y-0">
-        {rows
-          .filter(([, value]) => value)
-          .map(([label, value]) => (
-            <div key={label} className="flex items-center justify-between gap-4">
-              <dt className="flex-none text-neutral-500">{label}</dt>
-              <dd className="min-w-0 truncate text-right font-medium text-neutral-900">{value}</dd>
-            </div>
-          ))}
-        {booking.notes && (
-          <div className="sm:col-span-2">
-            <dt className="text-neutral-500">Notes</dt>
-            <dd className="mt-1 rounded-lg bg-neutral-50 p-2.5 text-neutral-700">{booking.notes}</dd>
-          </div>
-        )}
-      </dl>
-
-      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-neutral-100 pt-4 sm:mt-6 sm:justify-end">
-        <BookingActions booking={booking} onChanged={onChanged} />
-      </div>
-    </Modal>
-  )
 }
 
 function Stat({
@@ -121,17 +67,15 @@ function Stat({
   icon: Icon,
   tint,
   iconColor,
-  className = '',
 }: {
   label: string
   value: number
   icon: LucideIcon
   tint: string
   iconColor: string
-  className?: string
 }) {
   return (
-    <div className={`${panel} !p-4 lg:!p-5 ${className}`}>
+    <div className={`${panel} !p-4 lg:!p-5`}>
       <div className="flex items-start justify-between gap-2">
         <p className="text-2xl font-bold leading-none text-neutral-900 lg:text-[28px]">{value}</p>
         <span className={`flex h-9 w-9 flex-none items-center justify-center rounded-full lg:h-10 lg:w-10 ${tint}`}>
@@ -143,18 +87,126 @@ function Stat({
   )
 }
 
-const STATUS_TABS: { value: BookingStatus | ''; label: string }[] = [
-  { value: '', label: 'All Bookings' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'confirmed', label: 'Confirmed' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'cancelled', label: 'Cancelled' },
-  { value: 'no_show', label: 'No-show' },
-]
+const STATUS_LABELS: Record<BookingStatus | '', string> = {
+  '': 'All',
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  no_show: 'No-show',
+}
+
+const isStatus = (v: string | null): v is BookingStatus => STATUS_ORDER.includes(v as BookingStatus)
+
+/** Rows are newest-first; keep that order and break it into one group per day. */
+function groupByDay(rows: BookingRow[], tz: string) {
+  const groups: { key: string; rows: BookingRow[] }[] = []
+  for (const b of rows) {
+    const key = dayKey(b.start_at, tz)
+    const last = groups[groups.length - 1]
+    if (last?.key === key) last.rows.push(b)
+    else groups.push({ key, rows: [b] })
+  }
+  return groups
+}
+
+/** Date, staff and service filters — inline on wide screens, in this sheet on phones. */
+function FilterFields({
+  dateFilter,
+  setDateFilter,
+  staffId,
+  setStaffId,
+  serviceId,
+  setServiceId,
+  staff,
+  services,
+  stacked,
+}: {
+  dateFilter: DateFilter
+  setDateFilter: (v: DateFilter) => void
+  staffId: string
+  setStaffId: (v: string) => void
+  serviceId: string
+  setServiceId: (v: string) => void
+  staff: Staff[]
+  services: Service[]
+  stacked: boolean
+}) {
+  const select = stacked
+    ? `${input} !h-12 !rounded-xl !border-neutral-300`
+    : `${input} !h-9 !w-36 !rounded-lg !border-neutral-300`
+  return (
+    <div className={stacked ? 'space-y-5' : 'flex flex-wrap items-center gap-2.5'}>
+      {stacked ? (
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium text-neutral-700">Date</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(Object.keys(DATE_LABELS) as DateFilter[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                aria-pressed={dateFilter === d}
+                onClick={() => setDateFilter(d)}
+                className={`h-11 rounded-xl border text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 ${
+                  dateFilter === d ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 text-neutral-700 active:bg-neutral-50'
+                }`}
+              >
+                {DATE_LABELS[d]}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      ) : (
+        <div className="flex items-center gap-1.5 rounded-lg border border-neutral-300 pl-2.5">
+          <Filter size={14} strokeWidth={1.75} className="flex-none text-neutral-400" />
+          <Select
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value as DateFilter)}
+            className="h-9 w-28 border-none bg-transparent pl-1 text-sm text-neutral-700 outline-none"
+            aria-label="Filter by date"
+          >
+            {(Object.keys(DATE_LABELS) as DateFilter[]).map((d) => (
+              <option key={d} value={d}>
+                {DATE_LABELS[d]}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+      <label className={stacked ? 'block' : ''}>
+        {stacked && <span className="mb-2 block text-sm font-medium text-neutral-700">Staff</span>}
+        <Select value={staffId} onChange={(e) => setStaffId(e.target.value)} className={select} aria-label="Filter by staff">
+          <option value="">All staff</option>
+          {staff.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <label className={stacked ? 'block' : ''}>
+        {stacked && <span className="mb-2 block text-sm font-medium text-neutral-700">Service</span>}
+        <Select value={serviceId} onChange={(e) => setServiceId(e.target.value)} className={select} aria-label="Filter by service">
+          <option value="">All services</option>
+          {services.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </label>
+    </div>
+  )
+}
 
 export default function BookingsPage() {
   const { business, timezone } = useBusiness()
-  const [status, setStatus] = useState<BookingStatus | ''>('')
+  // ?status=pending lets other pages link straight to the bookings that need a decision.
+  const [params] = useSearchParams()
+  const [status, setStatus] = useState<BookingStatus | ''>(() => {
+    const s = params.get('status')
+    return isStatus(s) ? s : ''
+  })
   const [dateFilter, setDateFilter] = useState<DateFilter>('all')
   const [staffId, setStaffId] = useState('')
   const [serviceId, setServiceId] = useState('')
@@ -191,12 +243,12 @@ export default function BookingsPage() {
 
   const summary = useMemo(() => {
     const all = data?.bookings ?? []
+    const byStatus = new Map<BookingStatus, number>()
+    for (const b of all) byStatus.set(b.status, (byStatus.get(b.status) ?? 0) + 1)
     return {
       total: all.length,
       today: all.filter((b) => dayKey(b.start_at, timezone) === today).length,
-      pending: all.filter((b) => b.status === 'pending').length,
-      confirmed: all.filter((b) => b.status === 'confirmed').length,
-      completed: all.filter((b) => b.status === 'completed').length,
+      byStatus,
     }
   }, [data, timezone, today])
 
@@ -209,9 +261,8 @@ export default function BookingsPage() {
     if (staffName) out.push({ key: 'staff', label: staffName, clear: () => setStaffId('') })
     const serviceName = data?.services.find((s) => s.id === serviceId)?.name
     if (serviceName) out.push({ key: 'service', label: serviceName, clear: () => setServiceId('') })
-    if (q.trim()) out.push({ key: 'q', label: `“${q.trim()}”`, clear: () => setQ('') })
     return out
-  }, [dateFilter, staffId, serviceId, q, data])
+  }, [dateFilter, staffId, serviceId, data])
 
   const hasFilters = Boolean(status || staffId || serviceId || q.trim() || dateFilter !== 'all')
   function clearFilters() {
@@ -227,139 +278,85 @@ export default function BookingsPage() {
     setActive(null)
   }
 
-  return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 pb-24 sm:space-y-6 sm:pb-0 xl:max-w-7xl xl:space-y-7 2xl:max-w-[1680px]">
-      {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Bookings</h1>
-          <p className="mt-1 text-sm text-neutral-500">Manage and track your customer appointments.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <a
-            href="/dashboard/calendar"
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-neutral-300 px-3.5 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 sm:w-auto sm:justify-start sm:py-2"
-          >
-            <CalendarDays size={16} strokeWidth={1.75} />
-            View calendar
-          </a>
-          <div className="hidden sm:block">
-            <a href={bookingUrl} target="_blank" rel="noreferrer" className={btnPrimary}>
-              <Plus size={16} strokeWidth={1.75} />
-              Add booking
-            </a>
-          </div>
-        </div>
-      </div>
+  const tabs = (['', ...STATUS_ORDER] as (BookingStatus | '')[]).map((value) => ({
+    value,
+    label: STATUS_LABELS[value],
+    count: value ? (summary.byStatus.get(value) ?? 0) : summary.total,
+  }))
 
-      {/* Summary */}
+  const filterProps = {
+    dateFilter,
+    setDateFilter,
+    staffId,
+    setStaffId,
+    serviceId,
+    setServiceId,
+    staff: data?.staff ?? [],
+    services: data?.services ?? [],
+  }
+
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />
+
+  return (
+    <div className="mx-auto w-full max-w-6xl space-y-4 sm:space-y-6 xl:max-w-7xl xl:space-y-7 2xl:max-w-[1680px]">
+      <PageHeader
+        title="Bookings"
+        subtitle="Manage and track your customer appointments."
+        actions={
+          <>
+            <Link to="/dashboard/calendar" className={actionSecondary}>
+              <CalendarDays size={16} strokeWidth={1.75} /> View calendar
+            </Link>
+            <a href={bookingUrl} target="_blank" rel="noreferrer" className={actionPrimary}>
+              <Plus size={16} strokeWidth={2} /> Add booking
+            </a>
+          </>
+        }
+      />
+
+      {/* Summary — phones read these counts off the status tabs instead of five stacked cards */}
       {loading ? (
-        <StatGridSkeleton count={5} />
+        <div className="hidden sm:block">
+          <StatGridSkeleton count={5} />
+        </div>
       ) : (
         data && (
-          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5 sm:gap-3 xl:gap-4">
-            <Stat
-              label="Total Bookings"
-              value={summary.total}
-              icon={BarChart3}
-              tint="bg-indigo-50"
-              iconColor="text-indigo-600"
-              className="col-span-2 sm:col-span-1"
-            />
+          <div className="hidden gap-3 sm:grid sm:grid-cols-5 xl:gap-4">
+            <Stat label="Total Bookings" value={summary.total} icon={BarChart3} tint="bg-indigo-50" iconColor="text-indigo-600" />
             <Stat label="Today" value={summary.today} icon={CalendarDays} tint="bg-violet-50" iconColor="text-violet-600" />
-            <Stat label="Pending" value={summary.pending} icon={Clock} tint="bg-amber-50" iconColor="text-amber-600" />
-            <Stat label="Confirmed" value={summary.confirmed} icon={CheckCircle2} tint="bg-blue-50" iconColor="text-blue-600" />
-            <Stat label="Completed" value={summary.completed} icon={CheckCheck} tint="bg-green-50" iconColor="text-green-600" />
+            <Stat label="Pending" value={summary.byStatus.get('pending') ?? 0} icon={Clock} tint="bg-amber-50" iconColor="text-amber-600" />
+            <Stat
+              label="Confirmed"
+              value={summary.byStatus.get('confirmed') ?? 0}
+              icon={CheckCircle2}
+              tint="bg-blue-50"
+              iconColor="text-blue-600"
+            />
+            <Stat
+              label="Completed"
+              value={summary.byStatus.get('completed') ?? 0}
+              icon={CheckCheck}
+              tint="bg-green-50"
+              iconColor="text-green-600"
+            />
           </div>
         )
       )}
 
-      {/* Toolbar: tabs + search on one line; advanced filters collapse behind a toggle on
-          mobile, sit on their own bar from sm, and fold into the same toolbar row from lg. */}
-      <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 lg:gap-4">
-        <div className="no-scrollbar order-2 flex min-w-0 items-center gap-1 overflow-x-auto rounded-full bg-neutral-100 p-1 sm:order-1">
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setStatus(tab.value)}
-              className={`flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:py-1.5 lg:px-4 ${
-                status === tab.value ? 'bg-white text-brand-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-900'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Advanced filters */}
-        <div
-          id="booking-filters"
-          className={`${panel} ${showFilters ? 'grid' : 'hidden'} order-3 grid-cols-2 gap-2.5 !p-3 sm:flex sm:w-full sm:flex-wrap sm:items-center sm:gap-2.5 sm:!p-3.5 lg:order-3 lg:w-auto lg:flex-none lg:flex-nowrap lg:!border-0 lg:!border-l lg:!border-neutral-200 lg:!bg-transparent lg:!p-0 lg:!pl-4 lg:!shadow-none`}
-        >
-          <div className="col-span-2 flex items-center gap-1.5 rounded-lg border border-neutral-300 pl-2.5 sm:col-span-1">
-            <Filter size={14} strokeWidth={1.75} className="flex-none text-neutral-400" />
-            <Select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-              className="h-11 w-full border-none bg-transparent pl-1 text-sm text-neutral-700 outline-none sm:h-9 sm:w-28"
-              aria-label="Filter by date"
-            >
-              <option value="all">All dates</option>
-              <option value="today">Today</option>
-              <option value="upcoming">Upcoming</option>
-              <option value="past">Past</option>
-            </Select>
-          </div>
-          <Select
-            value={staffId}
-            onChange={(e) => setStaffId(e.target.value)}
-            className={`${input} !h-11 !w-full !rounded-lg !border-neutral-300 sm:!h-9 sm:!w-36`}
-            aria-label="Filter by staff"
-          >
-            <option value="">All staff</option>
-            {data?.staff.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            value={serviceId}
-            onChange={(e) => setServiceId(e.target.value)}
-            className={`${input} !h-11 !w-full !rounded-lg !border-neutral-300 sm:!h-9 sm:!w-40`}
-            aria-label="Filter by service"
-          >
-            <option value="">All services</option>
-            {data?.services.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </Select>
-        </div>
-
-        <div className="order-1 flex min-w-0 items-center gap-2 sm:order-2 sm:w-64 lg:order-2 lg:ml-auto lg:w-64 xl:w-72 2xl:w-80">
-          <div className="relative min-w-0 flex-1">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search bookings…"
-              className={`${input} !h-11 !rounded-full !border-neutral-300 !pl-9 sm:!h-9`}
-              aria-label="Search bookings"
-            />
-          </div>
+      {/* Toolbar. Phones: search + Filters button, then status tabs. Tablets: filters inline
+          under the tabs. Desktop: tabs and search share a row, filters on the next. */}
+      <div className="space-y-3">
+        <div className="flex min-w-0 items-center gap-2 lg:hidden">
+          <SearchField value={q} onChange={setQ} placeholder="Search bookings" label="Search bookings" className="flex-1" />
           <button
-            onClick={() => setShowFilters((v) => !v)}
-            aria-expanded={showFilters}
-            aria-controls="booking-filters"
-            className={`flex h-11 flex-none items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:hidden ${
-              advancedCount > 0
-                ? 'border-brand-600 bg-brand-50 text-brand-700'
-                : 'border-neutral-300 text-neutral-700 active:bg-neutral-50'
+            type="button"
+            onClick={() => setShowFilters(true)}
+            aria-haspopup="dialog"
+            className={`relative flex h-11 flex-none items-center gap-1.5 rounded-xl border px-3.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:hidden ${
+              advancedCount > 0 ? 'border-brand-600 bg-brand-50 text-brand-700' : 'border-neutral-200 bg-white text-neutral-700 active:bg-neutral-50'
             }`}
           >
-            <SlidersHorizontal size={16} strokeWidth={1.75} />
+            <SlidersHorizontal size={16} strokeWidth={2} aria-hidden />
             Filters
             {advancedCount > 0 && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[11px] font-semibold text-white">
@@ -368,72 +365,78 @@ export default function BookingsPage() {
             )}
           </button>
         </div>
+        <div className="flex min-w-0 items-center justify-between gap-4">
+          <SegmentedTabs options={tabs} value={status} onChange={setStatus} label="Filter by status" className="min-w-0" />
+          <SearchField value={q} onChange={setQ} placeholder="Search bookings" label="Search bookings" className="hidden w-72 flex-none lg:block" />
+        </div>
+        <div className="hidden sm:block">
+          <FilterFields {...filterProps} stacked={false} />
+        </div>
       </div>
 
       {/* Active filters + result count */}
-      {!loading && data && (data.bookings.length > 0 || hasFilters) && (
-        <div className="-mb-1 flex flex-wrap items-center gap-x-3 gap-y-2 lg:-mb-2">
-          <p className="text-xs font-medium text-neutral-500 lg:order-last lg:ml-auto lg:text-[13px]" aria-live="polite">
-            {hasFilters ? `${rows.length} of ${data.bookings.length}` : data.bookings.length} bookings
+      {!loading && data && (chips.length > 0 || hasFilters) && (
+        <div className="-mb-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <p className="text-xs font-medium text-neutral-500" aria-live="polite">
+            {rows.length} of {data.bookings.length} bookings
           </p>
           {chips.map((chip) => (
             <FilterChip key={chip.key} label={chip.label} onRemove={chip.clear} />
           ))}
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="rounded-md text-xs font-medium text-brand-600 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand-600"
-            >
-              Clear all
-            </button>
-          )}
+          <button
+            onClick={clearFilters}
+            className="-mx-1.5 min-h-8 rounded-md px-1.5 text-xs font-medium text-brand-600 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand-600"
+          >
+            Clear all
+          </button>
         </div>
       )}
 
-      <ErrorText message={error} />
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {loading ? (
         <ListSkeleton />
       ) : (data?.bookings.length ?? 0) === 0 ? (
-        <div className={`${panel} flex flex-col items-center px-4 py-10 text-center sm:py-14 lg:py-20`}>
-          <CalendarDays size={28} strokeWidth={1.5} className="text-neutral-300 lg:h-9 lg:w-9" />
-          <p className="mt-3 text-sm font-medium text-neutral-900 lg:mt-4 lg:text-base">No bookings yet</p>
-          <p className="mt-1 max-w-sm text-sm text-neutral-500">Customer appointments will appear here once they start booking.</p>
-          <a
-            href={bookingUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={`mt-4 ${btnPrimary}`}
-          >
-            <Plus size={16} strokeWidth={1.75} />
-            Add booking
-          </a>
+        <div className={`${panel} !p-0`}>
+          <EmptyState
+            icon={CalendarDays}
+            title="No bookings yet"
+            body="Share your booking page and appointments will appear here as customers book."
+            action={
+              <a href={bookingUrl} target="_blank" rel="noreferrer" className={actionPrimary}>
+                <Plus size={16} strokeWidth={2} /> Add booking
+              </a>
+            }
+          />
         </div>
       ) : rows.length === 0 ? (
-        <div className={`${panel} flex flex-col items-center px-4 py-10 text-center sm:py-14 lg:py-20`}>
-          <Filter size={28} strokeWidth={1.5} className="text-neutral-300 lg:h-9 lg:w-9" />
-          <p className="mt-3 text-sm font-medium text-neutral-900 lg:mt-4 lg:text-base">No bookings found</p>
-          <p className="mt-1 max-w-sm text-sm text-neutral-500">Try changing your search or filters.</p>
-          {hasFilters && (
-            <button onClick={clearFilters} className={`mt-4 ${btnPrimary}`}>
-              <X size={16} strokeWidth={1.75} />
-              Clear all filters
-            </button>
-          )}
+        <div className={`${panel} !p-0`}>
+          <EmptyState
+            icon={Filter}
+            title="No bookings match"
+            body="Try a different search, or clear the filters to see everything."
+            action={
+              <button onClick={clearFilters} className={actionSecondary}>
+                <X size={16} strokeWidth={2} /> Clear filters
+              </button>
+            }
+          />
         </div>
       ) : (
         <>
-          {/* Desktop table (lg+; tablets keep the card list so nothing gets squashed) */}
+          {/* Desktop table (lg+; tablets keep the list so nothing gets squashed). Fixed layout:
+              the text columns share what's left and truncate, instead of forcing a sideways scroll
+              on a 1024px laptop with the sidebar open. */}
           <div className={`${panel} hidden overflow-hidden !p-0 lg:block`}>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
+              <table className="w-full table-fixed text-left text-sm">
                 <thead className="border-b border-neutral-200 bg-neutral-50/70 text-[11px] font-medium uppercase tracking-wider text-neutral-500">
                   <tr>
-                    <th className="w-44 whitespace-nowrap px-4 py-3 font-medium xl:px-5">Date &amp; Time</th>
+                    <th className="w-40 whitespace-nowrap px-4 py-3 font-medium xl:w-44 xl:px-5">Date &amp; Time</th>
                     <th className="px-4 py-3 font-medium xl:px-5">Customer</th>
                     <th className="px-4 py-3 font-medium xl:px-5">Service</th>
                     <th className="px-4 py-3 font-medium xl:px-5">Staff</th>
-                    <th className="w-32 px-4 py-3 font-medium xl:px-5">Status</th>
+                    <th className="w-30 px-4 py-3 font-medium xl:w-32 xl:px-5">Status</th>
                     <th className="hidden w-40 whitespace-nowrap px-4 py-3 font-medium xl:table-cell xl:px-5">Created</th>
                     <th className="w-16 px-4 py-3 font-medium xl:px-5">
                       <span className="sr-only">Actions</span>
@@ -447,7 +450,7 @@ export default function BookingsPage() {
                         {fmtDateTime(b.start_at, timezone)}
                       </td>
                       <td className="px-4 py-3 align-middle xl:px-5">
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex min-w-0 items-center gap-2.5">
                           <span className="hidden h-8 w-8 flex-none items-center justify-center rounded-full bg-neutral-100 text-[11px] font-semibold text-neutral-600 xl:flex">
                             {b.customers?.name ? initials(b.customers.name) : <User size={14} />}
                           </span>
@@ -459,7 +462,9 @@ export default function BookingsPage() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 align-middle text-neutral-700 xl:px-5">{b.services?.name}</td>
+                      <td className="truncate px-4 py-3 align-middle text-neutral-700 xl:px-5" title={b.services?.name}>
+                        {b.services?.name}
+                      </td>
                       <td className="px-4 py-3 align-middle text-neutral-700 xl:px-5">
                         {b.staff ? (
                           <>
@@ -482,7 +487,7 @@ export default function BookingsPage() {
                         <button
                           onClick={() => setActive(b)}
                           className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-neutral-400 outline-none transition-colors hover:border-neutral-200 hover:bg-white hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 group-hover:text-neutral-600"
-                          aria-label={`View booking ${reference(b.public_token)}`}
+                          aria-label={`View booking ${bookingRef(b.public_token)}`}
                           title="View booking"
                         >
                           <Eye size={16} strokeWidth={1.75} />
@@ -495,49 +500,61 @@ export default function BookingsPage() {
             </div>
           </div>
 
-          {/* Mobile + tablet card list */}
-          <ul className="space-y-2.5 sm:space-y-3 lg:hidden">
-            {rows.map((b) => (
-              <li key={b.id}>
-                <button
-                  onClick={() => setActive(b)}
-                  className={`${panel} flex w-full items-center gap-3 !p-3.5 text-left outline-none transition-colors hover:bg-neutral-50 active:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-neutral-900 sm:gap-4 sm:!p-4`}
-                >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white">
-                    {b.customers?.name ? initials(b.customers.name) : <User size={14} />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="min-w-0 truncate text-[14px] font-medium text-neutral-900">{b.customers?.name}</p>
-                      <StatusBadge status={b.status} />
-                    </div>
-                    <p className="mt-0.5 truncate text-xs text-neutral-500">{fmtDateTime(b.start_at, timezone)}</p>
-                    <p className="mt-1 truncate text-sm text-neutral-600">
-                      {b.services?.name} with {b.staff?.name ?? 'any staff'}
-                    </p>
-                  </div>
-                  <ChevronRight size={16} strokeWidth={1.75} className="shrink-0 text-neutral-300" />
-                </button>
-              </li>
+          {/* Phones + tablets: one list, broken up by day, each row a single tap to open */}
+          <div className={`${panel} overflow-hidden !p-0 lg:hidden`}>
+            {groupByDay(rows, timezone).map((g, i) => (
+              <section key={g.key} aria-label={relativeDay(g.key, today)} className={i > 0 ? 'border-t border-neutral-100' : ''}>
+                <h2 className="flex items-baseline justify-between bg-neutral-50/80 px-4 py-2 text-xs font-semibold text-neutral-500">
+                  <span className={g.key === today ? 'text-brand-700' : ''}>{relativeDay(g.key, today)}</span>
+                  <span className="font-normal text-neutral-400">{g.rows.length}</span>
+                </h2>
+                <ul className="divide-y divide-neutral-100">
+                  {g.rows.map((b) => (
+                    <BookingListItem key={b.id} booking={b} timezone={timezone} onSelect={setActive} />
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         </>
       )}
 
-      {active && (
-        <BookingDetails booking={active} timezone={timezone} onClose={() => setActive(null)} onChanged={handleChanged} />
+      {showFilters && (
+        <Modal
+          onClose={() => setShowFilters(false)}
+          title="Filter bookings"
+          titleId="booking-filters-title"
+          footer={
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFilter('all')
+                  setStaffId('')
+                  setServiceId('')
+                }}
+                disabled={advancedCount === 0}
+                className={`${actionSecondary} flex-none`}
+              >
+                Reset
+              </button>
+              <button type="button" onClick={() => setShowFilters(false)} className={`${actionPrimary} flex-1`}>
+                Show {rows.length} booking{rows.length === 1 ? '' : 's'}
+              </button>
+            </div>
+          }
+        >
+          <FilterFields {...filterProps} stacked />
+        </Modal>
       )}
 
-      {/* Mobile floating action button */}
-      <a
-        href={bookingUrl}
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Add booking"
-        className="fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 outline-none transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:hidden"
-      >
-        <Plus size={24} strokeWidth={2} />
-      </a>
+      {active && (
+        <BookingDetailsSheet booking={active} timezone={timezone} onClose={() => setActive(null)} onChanged={handleChanged} />
+      )}
+
+      <Fab label="Add booking" href={bookingUrl} />
+      {/* Keeps the last row clear of the floating button */}
+      <div aria-hidden className="h-16 sm:hidden" />
     </div>
   )
 }

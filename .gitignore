@@ -32,3 +32,6 @@ dist-ssr
 
 # Local agent/editor worktrees
 .kilo
+
+# Supabase CLI link state (project ref, pooler host) — local only
+supabase/.temp

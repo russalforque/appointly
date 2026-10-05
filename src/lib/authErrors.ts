@@ -22,8 +22,12 @@ export function authErrorMessage(message: string, action: AuthAction): string {
     return 'Confirm your email first — open the link we sent you, then sign in.'
   if (m.includes('already registered') || m.includes('already been registered') || m.includes('user_already_exists'))
     return 'An account already uses that email address. Sign in instead, or reset your password.'
-  if (m.includes('password should be') || m.includes('weak_password') || m.includes('at least 6'))
-    return 'Choose a password with at least 6 characters.'
+  // GoTrue's own wording names the rule the project is configured with (length, character
+  // classes, known-breached), so it is passed through rather than guessed at.
+  if (m.startsWith('password should') || m.includes('known to be weak'))
+    return message
+  if (m.includes('weak_password') || m.includes('weak password'))
+    return 'Choose a stronger password — at least 8 characters, and not one used on other sites.'
   if (m.includes('same password') || m.includes('should be different'))
     return 'Choose a password you have not used on this account before.'
   if (m.includes('invalid email') || m.includes('email_address_invalid'))

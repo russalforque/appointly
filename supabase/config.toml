@@ -3,3 +3,9 @@ verify_jwt = false
 
 [functions.xendit-webhook]
 verify_jwt = false
+
+[functions.booking-confirmed-email]
+verify_jwt = false
+
+[functions.booking-reminders]
+verify_jwt = false

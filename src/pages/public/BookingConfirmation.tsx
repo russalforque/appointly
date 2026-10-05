@@ -1,14 +1,17 @@
 import { useCallback, useState, type CSSProperties } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { AlertCircle, CalendarPlus, CheckCircle2, Clock, MapPin, Phone, XCircle, type LucideIcon } from 'lucide-react'
+import { AlertCircle, ArrowUpRight, CalendarPlus, CheckCircle2, Clock, Info, MapPin, Phone, XCircle, type LucideIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
 import { cancelBooking } from '../../lib/booking'
 import { fmtDuration, fmtTime } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
+import { useConfirm } from '../../lib/confirm'
+import { useToast } from '../../lib/toast'
+import { directionsUrl } from '../../lib/publicBusiness'
 import type { BookingStatus } from '../../lib/types'
 import Reveal from '../../components/Reveal'
-import { ErrorText, Loading } from '../../components/Status'
+import { ErrorText, NotFoundPage } from '../../components/Status'
 
 interface PublicBooking {
   status: BookingStatus
@@ -25,6 +28,10 @@ interface PublicBooking {
   can_cancel: boolean
   business_logo_url: string | null
   business_accent_color: string | null
+  business_maps_url: string | null
+  booking_instructions: string | null
+  confirmation_message: string | null
+  cancellation_policy: string | null
 }
 
 const HEADLINE: Record<BookingStatus, string> = {
@@ -81,7 +88,7 @@ function Detail({ label, value, sub }: { label: string; value: string; sub?: str
   return (
     <div className="flex items-baseline justify-between gap-4 py-3">
       <dt className="shrink-0 text-[13px] text-slate-500">{label}</dt>
-      <dd className="text-right text-sm font-medium text-slate-900">
+      <dd className="min-w-0 text-right text-sm font-medium text-slate-900 wrap-break-word">
         {value}
         {sub && <span className="block text-[13px] font-normal text-slate-500">{sub}</span>}
       </dd>
@@ -98,15 +105,43 @@ export default function BookingConfirmation() {
   const { data: b, loading, error, reload } = useLoad(load)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
+  const confirm = useConfirm()
+  const toast = useToast()
 
-  if (loading) return <Loading />
-  if (error || !b) return <p className="p-6 text-center text-slate-600">Booking not found.</p>
+  if (loading)
+    return (
+      <main className="font-site min-h-screen animate-pulse bg-slate-50 px-4 py-12 sm:py-16" aria-busy="true" aria-label="Loading booking">
+        <div className="mx-auto max-w-xl">
+          <div className="mx-auto h-14 w-14 rounded-full bg-slate-200" />
+          <div className="mx-auto mt-4 h-7 w-56 rounded bg-slate-200" />
+          <div className="mx-auto mt-2 h-4 w-72 max-w-full rounded bg-slate-200" />
+          <div className="mt-7 h-80 rounded-3xl bg-white" />
+        </div>
+      </main>
+    )
+  if (error || !b)
+    return (
+      <NotFoundPage
+        title="Booking not found"
+        body="This booking link is incomplete or no longer valid. Open the link from your confirmation again, or contact the business."
+      />
+    )
 
   async function cancel() {
+    if (cancelling || !b) return
+    const ok = await confirm({
+      title: 'Cancel your appointment?',
+      body: `Your ${b.service_name} booking with ${b.business_name} will be cancelled and the time given to someone else. This cannot be undone.`,
+      confirmLabel: 'Yes, cancel it',
+      cancelLabel: 'Keep my booking',
+      tone: 'danger',
+    })
+    if (!ok) return
     setCancelling(true)
     setCancelError(null)
     try {
       await cancelBooking(token)
+      toast('Your booking was cancelled')
       reload()
     } catch (e) {
       setCancelError(e instanceof Error ? e.message : 'Could not cancel booking')
@@ -119,6 +154,8 @@ export default function BookingConfirmation() {
   const accentSolid = { backgroundColor: accent } as CSSProperties
   const accentText = { color: accent } as CSSProperties
   const accentTint = { backgroundColor: `color-mix(in srgb, ${accent} 12%, white)` } as CSSProperties
+  const accentTintSoft = { backgroundColor: `color-mix(in srgb, ${accent} 6%, white)` } as CSSProperties
+  const directions = directionsUrl(b.business_maps_url, b.business_address ?? '')
   const isActive = b.status === 'pending' || b.status === 'confirmed'
   const statusTint =
     b.status === 'confirmed' ? accentTint
@@ -147,6 +184,9 @@ export default function BookingConfirmation() {
           </span>
           <h1 className="font-display text-2xl font-medium tracking-tight text-slate-900 sm:text-3xl">{HEADLINE[b.status]}</h1>
           <p className="mt-2 text-sm text-slate-500">{SUBTEXT[b.status]}</p>
+          {isActive && b.confirmation_message && (
+            <p className="mx-auto mt-4 max-w-md whitespace-pre-line text-[15px] leading-relaxed text-slate-700">{b.confirmation_message}</p>
+          )}
         </Reveal>
 
         <Reveal delay={80} className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -188,10 +228,23 @@ export default function BookingConfirmation() {
           </div>
         </Reveal>
 
+        {isActive && b.booking_instructions && (
+          <Reveal delay={100}>
+            <div className="mt-4 flex gap-3 rounded-2xl p-4 text-sm leading-relaxed text-slate-700" style={accentTintSoft}>
+              <Info size={17} className="mt-0.5 shrink-0" style={accentText} aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-900">Before your visit</p>
+                <p className="mt-0.5 whitespace-pre-line">{b.booking_instructions}</p>
+              </div>
+            </div>
+          </Reveal>
+        )}
+
         {isActive && (
           <Reveal delay={120}>
             <p className="mt-4 text-center text-[13px] text-slate-500">
               A confirmation will be sent using the contact information you provided.
+              <span className="block">Didn't get the email? Check your spam or junk folder.</span>
             </p>
           </Reveal>
         )}
@@ -209,6 +262,15 @@ export default function BookingConfirmation() {
                 {!b.business_slug ? 'Done' : isActive ? `Back to ${b.business_name}` : 'Book another appointment'}
               </Link>
             </div>
+            {isActive && b.cancellation_policy && (
+              <details className="group rounded-2xl border border-slate-200 bg-white text-left">
+                <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
+                  Cancellation policy
+                  <span className="text-slate-400 transition-transform group-open:rotate-45" aria-hidden="true">+</span>
+                </summary>
+                <p className="whitespace-pre-line px-5 pb-4 text-[13px] leading-relaxed text-slate-600">{b.cancellation_policy}</p>
+              </details>
+            )}
             {b.can_cancel && (
               <div className="text-center">
                 <button
@@ -227,12 +289,25 @@ export default function BookingConfirmation() {
         {(b.business_address || b.business_phone) && (
           <Reveal delay={200}>
             <div className="mt-8 rounded-2xl border border-slate-200 bg-white px-5 py-4">
-              <h2 className="text-[13px] font-semibold text-slate-900">Need to reach {b.business_name}?</h2>
+              <h2 className="text-[13px] font-semibold text-slate-900 wrap-break-word">Need to reach {b.business_name}?</h2>
               <ul className="mt-2 space-y-2 text-[13px] text-slate-600">
                 {b.business_address && (
                   <li className="flex items-start gap-2">
                     <MapPin size={15} className="mt-0.5 shrink-0 text-slate-400" aria-hidden="true" />
-                    <span>{b.business_address}</span>
+                    <span className="min-w-0">
+                      <span className="block wrap-break-word">{b.business_address}</span>
+                      {directions && (
+                        <a
+                          href={directions}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-0.5 inline-flex items-center gap-1 font-medium underline-offset-2 hover:underline"
+                          style={accentText}
+                        >
+                          Get directions <ArrowUpRight size={13} aria-hidden="true" />
+                        </a>
+                      )}
+                    </span>
                   </li>
                 )}
                 {b.business_phone && (

@@ -52,17 +52,14 @@ type SlugState =
   | { kind: 'unknown' }
 
 /**
- * Looks up one slug. Authenticated users may read active businesses (businesses_public_read), so
- * this catches the common collision before the owner commits. It is a courtesy check, not the
- * guarantee — the unique index is, and a 23505 on submit is still handled.
+ * Looks up one slug through is_slug_available() (0028) — other businesses' rows are not readable
+ * directly, and the function also counts hidden pages. It is a courtesy check, not the guarantee —
+ * the unique index is, and a 23505 on submit is still handled.
  */
 async function checkSlug(slug: string): Promise<SlugState> {
-  const { count, error } = await supabase
-    .from('businesses')
-    .select('id', { count: 'exact', head: true })
-    .eq('slug', slug)
+  const { data, error } = await supabase.rpc('is_slug_available', { p_slug: slug })
   if (error) return { kind: 'unknown' }
-  return count ? { kind: 'taken' } : { kind: 'free' }
+  return data ? { kind: 'free' } : { kind: 'taken' }
 }
 
 const SLUG_COPY: Record<SlugState['kind'], { text: string; tone: string; icon: LucideIcon | null }> = {
@@ -97,7 +94,9 @@ export default function CreateBusiness({ onCreated }: { onCreated: () => void })
   const [checked, setChecked] = useState<{ slug: string; state: SlugState } | null>(null)
   const errorRef = useRef<HTMLDivElement>(null)
 
-  const effectiveSlug = slugTouched ? slug : slugify(name).slice(0, SLUG_MAX)
+  // What the field shows may end in a dash mid-typing ("bloom-"); what is checked and saved never does.
+  const slugDraft = slugTouched ? slug : slugify(name).slice(0, SLUG_MAX)
+  const effectiveSlug = slugDraft.replace(/-+$/, '')
   const bookingHost = useMemo(() => `${window.location.host}/book/`, [])
 
   const slugState: SlugState = !effectiveSlug
@@ -135,11 +134,20 @@ export default function CreateBusiness({ onCreated }: { onCreated: () => void })
     if (!canSubmit) return
     setBusy(true)
     setError(null)
-    const { error } = await supabase.rpc('create_business', {
+    const { data: businessId, error } = await supabase.rpc('create_business', {
       p_name: name.trim(),
       p_slug: effectiveSlug,
       p_category: category,
     })
+    if (!error && businessId) {
+      // create_business leaves the timezone at the column default, UTC, which puts every slot of a
+      // Manila business eight hours off. Start from the owner's own zone; Business Hours can change
+      // it. Not fatal if it fails — that page flags a UTC setting that doesn't match the browser.
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+      if (timezone && timezone !== 'UTC') {
+        await supabase.from('business_settings').update({ timezone }).eq('business_id', businessId)
+      }
+    }
     setBusy(false)
     if (error) {
       if (error.code === '23505') {
@@ -271,10 +279,17 @@ export default function CreateBusiness({ onCreated }: { onCreated: () => void })
                 <input
                   id="biz-slug"
                   name="slug"
-                  value={effectiveSlug}
+                  value={slugDraft}
                   onChange={(e) => {
                     setSlugTouched(true)
-                    setSlug(slugify(e.target.value).slice(0, SLUG_MAX))
+                    // Not slugify(): it trims a trailing dash, which made typing "my-shop" impossible.
+                    setSlug(
+                      e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9]+/g, '-')
+                        .replace(/^-+/, '')
+                        .slice(0, SLUG_MAX),
+                    )
                   }}
                   inputMode="url"
                   autoComplete="off"

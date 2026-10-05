@@ -1,15 +1,21 @@
 import { Fragment, useCallback, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarOff, ChevronRight, Clock3, Eye, EyeOff, Plus, Search, Users, type LucideIcon } from 'lucide-react'
+import { ChevronRight, Clock3, Eye, EyeOff, Loader2, Plus, Search, Users, X, type LucideIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { formStr, unwrap, friendlyError } from '../../lib/db'
 import { useLoad } from '../../lib/useLoad'
-import { btn, btnGhost, input, panel } from '../../lib/ui'
+import { useToast } from '../../lib/toast'
+import { actionPrimary, actionSecondary, btnGhost, input, panel } from '../../lib/ui'
 import { fmtClock, initials } from '../../lib/format'
 import type { Schedule, Service, Staff } from '../../lib/types'
 import Field from '../../components/Field'
 import Modal from '../../components/Modal'
-import { ErrorText, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
+import PageHeader from '../../components/PageHeader'
+import SearchField from '../../components/SearchField'
+import SegmentedTabs from '../../components/SegmentedTabs'
+import Fab from '../../components/Fab'
+import { EmptyState, ErrorState, ErrorText, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
+import { UPGRADE_HREF } from '../../lib/plans'
 import { useBusiness } from './useBusiness'
 
 const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]
@@ -114,7 +120,7 @@ function StaffCard({
   onToggle: () => void
 }) {
   return (
-    <li className="relative sm:hidden">
+    <li className="relative lg:hidden">
       <Link
         to={staff.id}
         className={`flex w-full items-center gap-3 py-3 pl-3 pr-13 text-left outline-none transition-colors active:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600 ${
@@ -139,9 +145,9 @@ function StaffCard({
             </span>
             <span className="text-neutral-300">·</span>
             {groups.length === 0 ? (
-              <span className="inline-flex items-center gap-1 text-amber-600">
-                <CalendarOff size={12} strokeWidth={1.75} />
-                No schedule
+              <span className="inline-flex items-center gap-1">
+                <Clock3 size={12} strokeWidth={1.75} className="text-neutral-400" />
+                Business hours
               </span>
             ) : (
               <span className="inline-flex items-center gap-1">
@@ -179,7 +185,7 @@ function StaffRow({
   onToggle: () => void
 }) {
   return (
-    <li className="hidden items-center gap-4 py-3 sm:flex">
+    <li className="hidden items-center gap-4 py-3 lg:flex">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <Avatar staff={staff} className="h-10 w-10 rounded-full text-sm" />
         <div className="min-w-0">
@@ -189,7 +195,7 @@ function StaffRow({
         </div>
       </div>
 
-      <div className="w-40 text-sm">
+      <div className="hidden w-40 text-sm xl:block">
         {services.length === 0 ? (
           <span className="text-neutral-400">None assigned</span>
         ) : services.length <= 2 ? (
@@ -203,9 +209,9 @@ function StaffRow({
 
       <div className="w-44 text-sm">
         {groups.length === 0 ? (
-          <span className="inline-flex items-center gap-1.5 text-amber-600">
-            <CalendarOff size={13} strokeWidth={1.75} />
-            No schedule set
+          <span className="inline-flex items-center gap-1.5 text-neutral-500" title="No custom schedule — follows your business hours">
+            <Clock3 size={13} strokeWidth={1.75} className="text-neutral-400" />
+            Business hours
           </span>
         ) : (
           <span className="text-neutral-700">
@@ -236,12 +242,15 @@ function StaffRow({
   )
 }
 
-function StaffForm({ businessId, onDone }: { businessId: string; onDone: (saved: boolean) => void }) {
+/** Add a staff member, as a sheet with Save pinned below the fields. */
+function StaffSheet({ businessId, onDone }: { businessId: string; onDone: (saved: boolean) => void }) {
+  const toast = useToast()
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (saving) return
     const f = new FormData(e.currentTarget)
     setSaving(true)
     const { error } = await supabase.from('staff').insert({
@@ -254,25 +263,45 @@ function StaffForm({ businessId, onDone }: { businessId: string; onDone: (saved:
     })
     setSaving(false)
     if (error) setError(friendlyError(error.message))
-    else onDone(true)
+    else {
+      toast('Staff member added')
+      onDone(true)
+    }
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <Modal
+      onClose={() => onDone(false)}
+      titleId="staff-form-title"
+      title="New staff member"
+      maxWidth="max-w-lg"
+      footer={
+        <div className="flex gap-2">
+          <button type="button" className={`${actionSecondary} flex-none`} onClick={() => onDone(false)}>
+            Cancel
+          </button>
+          <button form="staff-form" className={`${actionPrimary} flex-1`} disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" aria-hidden />}
+            {saving ? 'Saving…' : 'Add staff member'}
+          </button>
+        </div>
+      }
+    >
+    <form id="staff-form" onSubmit={submit} className="space-y-4">
       <Field label="Name">
-        <input name="name" required placeholder="e.g. Jane Santos" className={`${input} h-12 sm:h-auto`} />
+        <input name="name" required maxLength={120} placeholder="e.g. Jane Santos" className={`${input} h-12 sm:h-auto`} />
       </Field>
 
       <Field label="Position / Role" hint="Optional — shown next to their name.">
-        <input name="position" placeholder="e.g. Dentist, Barber, Receptionist" className={`${input} h-12 sm:h-auto`} />
+        <input name="position" maxLength={120} placeholder="e.g. Dentist, Barber, Receptionist" className={`${input} h-12 sm:h-auto`} />
       </Field>
 
-      <Field label="Email">
-        <input name="email" type="email" inputMode="email" autoComplete="email" placeholder="jane@example.com" className={`${input} h-12 sm:h-auto`} />
+      <Field label="Email" hint="Optional.">
+        <input name="email" type="email" maxLength={254} inputMode="email" autoComplete="email" placeholder="jane@example.com" className={`${input} h-12 sm:h-auto`} />
       </Field>
 
-      <Field label="Phone">
-        <input name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="09XX XXX XXXX" className={`${input} h-12 sm:h-auto`} />
+      <Field label="Phone" hint="Optional.">
+        <input name="phone" type="tel" maxLength={40} inputMode="tel" autoComplete="tel" placeholder="09XX XXX XXXX" className={`${input} h-12 sm:h-auto`} />
       </Field>
 
       <Field label="Photo URL" hint="Optional. Paste a hosted image link — initials are used otherwise.">
@@ -280,25 +309,17 @@ function StaffForm({ businessId, onDone }: { businessId: string; onDone: (saved:
       </Field>
 
       <p className="rounded-xl bg-neutral-50 px-3 py-2.5 text-xs text-neutral-500">
-        You can assign services and set their weekly availability once they are added.
+        Once added, assign their services. They work your business hours unless you give them their own schedule.
       </p>
 
       <ErrorText message={error} />
-
-      <div className="flex gap-2 pt-1">
-        <button type="button" className={`${btnGhost} h-11 flex-none px-4`} onClick={() => onDone(false)}>
-          Cancel
-        </button>
-        <button className={`${btn} h-11 flex-1`} disabled={saving}>
-          {saving ? 'Saving…' : 'Add staff member'}
-        </button>
-      </div>
     </form>
+    </Modal>
   )
 }
 
 export default function StaffPage() {
-  const { business } = useBusiness()
+  const { business, can } = useBusiness()
   const load = useCallback(async () => {
     const staff = await unwrap<Staff[]>(supabase.from('staff').select('*').eq('business_id', business.id).order('name'))
     const ids = staff.map((s) => s.id)
@@ -314,6 +335,7 @@ export default function StaffPage() {
     return { staff, links, services, schedules }
   }, [business.id])
   const { data, loading, error, reload } = useLoad(load)
+  const toast = useToast()
   const [adding, setAdding] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -322,6 +344,7 @@ export default function StaffPage() {
   async function toggle(s: Staff) {
     const { error } = await supabase.from('staff').update({ is_active: !s.is_active }).eq('id', s.id)
     setActionError(error ? friendlyError(error.message) : null)
+    if (!error) toast(s.is_active ? `${s.name} can no longer be booked` : `${s.name} can be booked again`)
     reload()
   }
 
@@ -363,15 +386,29 @@ export default function StaffPage() {
     return (
       <div className="mx-auto max-w-6xl space-y-4">
         <PageHeaderSkeleton withAction />
-        <StatGridSkeleton />
+        <div className="hidden sm:block">
+          <StatGridSkeleton />
+        </div>
         <ListSkeleton />
       </div>
     )
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />
 
   const staff = data?.staff ?? []
   const hasStaff = staff.length > 0
   const isFiltering = status !== 'all' || query.trim() !== ''
-  const tabCounts: Record<StatusFilter, number> = { all: summary.total, active: summary.active, inactive: summary.inactive }
+  const tabs = STATUS_TABS.map((t) => ({ ...t, count: { all: summary.total, active: summary.active, inactive: summary.inactive }[t.value] }))
+  // Mirrors business_staff_limit(); the database refuses a staff member past it either way.
+  const limit = can.staffLimit
+  const atLimit = limit !== null && summary.active >= limit
+  const overLimit = limit !== null && summary.active > limit
+  const addStaff = () => {
+    if (atLimit) {
+      setActionError(`Your plan includes up to ${limit} active staff members. Upgrade to Business for unlimited staff.`)
+      return
+    }
+    setAdding(true)
+  }
 
   function clearFilters() {
     setStatus('all')
@@ -379,109 +416,91 @@ export default function StaffPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-0">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Staff</h1>
-          <p className="mt-1 text-sm text-neutral-500">Manage your team, services, and availability.</p>
-        </div>
-        <button className={`${btn} hidden items-center gap-1.5 sm:inline-flex`} onClick={() => setAdding(true)}>
-          <Plus size={16} strokeWidth={1.75} /> Add Staff
-        </button>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-5">
+      <PageHeader
+        title="Staff"
+        subtitle={
+          limit === null
+            ? 'Manage your team, services, and availability.'
+            : `Manage your team, services, and availability · ${summary.active} of ${limit} active staff on your plan.`
+        }
+        actions={
+          <button className={actionPrimary} onClick={addStaff} disabled={atLimit} title={atLimit ? 'Staff limit reached' : undefined}>
+            <Plus size={16} strokeWidth={2} /> Add staff
+          </button>
+        }
+      />
 
+      {/* Phones read the counts off the filter tabs instead */}
       {hasStaff && (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
+        <div className="hidden gap-3 sm:grid sm:grid-cols-4">
           <Stat label="Total staff" value={summary.total} icon={Users} tint="bg-indigo-50" iconColor="text-indigo-600" />
           <Stat label="Active" value={summary.active} icon={Eye} tint="bg-green-50" iconColor="text-green-600" />
           <Stat label="Inactive" value={summary.inactive} icon={EyeOff} tint="bg-neutral-100" iconColor="text-neutral-500" />
-          <Stat label="With schedule" value={summary.scheduled} icon={Clock3} tint="bg-blue-50" iconColor="text-blue-600" />
+          <Stat label="Custom schedule" value={summary.scheduled} icon={Clock3} tint="bg-blue-50" iconColor="text-blue-600" />
         </div>
       )}
 
       <ErrorText message={error ?? actionError} />
 
-      {/* Nobody can be booked without a schedule, so surface the gap instead of burying it per-row */}
-      {hasStaff && summary.scheduled < summary.active && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-800">
-          <CalendarOff size={16} strokeWidth={1.75} className="mt-0.5 shrink-0" />
-          <p>
-            {summary.active - summary.scheduled} active staff member{summary.active - summary.scheduled === 1 ? ' has' : 's have'} no
-            weekly schedule, so customers cannot book them yet.
+      {/* The plan's staff allowance: only shown once it starts to matter */}
+      {limit !== null && atLimit && (
+        <div className="flex flex-col gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-3.5 py-3 text-sm sm:flex-row sm:items-center">
+          <Users size={16} strokeWidth={1.75} className="hidden shrink-0 text-brand-600 sm:block" />
+          <p className="min-w-0 flex-1 text-neutral-700">
+            {overLimit
+              ? `You have ${summary.active} active staff — more than the ${limit} your plan includes. Everyone stays bookable, but you can't add or reactivate staff until you're below ${limit}.`
+              : `You're using all ${limit} staff places on your plan. Deactivated staff don't count — or get unlimited staff on Business.`}
           </p>
+          <Link to={UPGRADE_HREF} className={`${actionSecondary} flex-none`}>
+            View Business plan
+          </Link>
         </div>
       )}
 
       {hasStaff && (
-        <div className="flex flex-col gap-2.5 sm:flex-row-reverse sm:items-center sm:justify-between sm:gap-3">
-          <div className="relative min-w-0 sm:w-64 sm:flex-none">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, role or email…"
-              aria-label="Search staff"
-              className={`${input} !h-11 !rounded-full !border-neutral-300 !pl-10 sm:!h-9 sm:!pl-9`}
-            />
-          </div>
-
-          {/* Counts on the tabs make the filter's effect predictable before tapping it */}
-          <div className="no-scrollbar -mx-4 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <div className="flex flex-none items-center gap-1 rounded-full bg-neutral-100 p-1">
-              {STATUS_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => setStatus(tab.value)}
-                  aria-pressed={status === tab.value}
-                  className={`flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:py-1.5 ${
-                    status === tab.value ? 'bg-white text-brand-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-900'
-                  }`}
-                >
-                  {tab.label}
-                  <span className={`ml-1.5 text-xs ${status === tab.value ? 'text-brand-500' : 'text-neutral-400'}`}>
-                    {tabCounts[tab.value]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="space-y-2.5 sm:flex sm:flex-row-reverse sm:items-center sm:justify-between sm:gap-3 sm:space-y-0">
+          <SearchField value={query} onChange={setQuery} placeholder="Search name or role" label="Search staff" className="sm:w-64" />
+          <SegmentedTabs options={tabs} value={status} onChange={setStatus} label="Filter staff" />
         </div>
       )}
 
       {!hasStaff ? (
-        <div className={`${panel} space-y-3 py-10 text-center`}>
-          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
-            <Users size={20} strokeWidth={1.75} />
-          </span>
-          <div>
-            <p className="text-sm font-medium text-neutral-800">No staff yet</p>
-            <p className="mt-1 text-sm text-neutral-500">Add your team so you can assign services and manage their availability.</p>
-          </div>
-          <button className={`${btn} inline-flex h-11 items-center gap-1.5`} onClick={() => setAdding(true)}>
-            <Plus size={16} strokeWidth={1.75} /> Add Staff
-          </button>
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Users}
+            title="No staff yet"
+            body="Add your team, then give each person their services and weekly hours."
+            action={
+              <button className={actionPrimary} onClick={() => setAdding(true)}>
+                <Plus size={16} strokeWidth={2} /> Add your first staff member
+              </button>
+            }
+          />
         </div>
       ) : filtered.length === 0 ? (
-        <div className={`${panel} space-y-3 py-10 text-center`}>
-          <div>
-            <p className="text-sm font-medium text-neutral-800">No staff match</p>
-            <p className="mt-1 text-sm text-neutral-500">Try a different search term or filter.</p>
-          </div>
-          <button type="button" className={`${btnGhost} inline-flex h-11 items-center px-4`} onClick={clearFilters}>
-            Clear filters
-          </button>
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Search}
+            title="No staff match"
+            body="Try a different search term or filter."
+            action={
+              <button type="button" className={actionSecondary} onClick={clearFilters}>
+                <X size={16} strokeWidth={2} /> Clear filters
+              </button>
+            }
+          />
         </div>
       ) : (
-        <div className={`${panel} !p-0`}>
-          <div className="hidden items-center gap-4 border-b border-neutral-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-400 sm:flex">
+        <div className={`${panel} overflow-hidden p-0!`}>
+          <div className="hidden items-center gap-4 border-b border-neutral-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-400 lg:flex">
             <span className="flex-1">Staff</span>
-            <span className="w-40">Assigned Services</span>
+            <span className="hidden w-40 xl:block">Assigned Services</span>
             <span className="w-44">Availability</span>
             <span className="w-20 text-center">Status</span>
             <span className="w-24 text-right">Actions</span>
           </div>
-          <ul className="divide-y divide-neutral-100 sm:px-4">
+          <ul className="divide-y divide-neutral-100 lg:px-4">
             {filtered.map((s) => {
               const services = servicesByStaff.get(s.id) ?? []
               const groups = summarizeSchedule(scheduleByStaff.get(s.id) ?? [])
@@ -505,27 +524,17 @@ export default function StaffPage() {
         </p>
       )}
 
-      {/* Mobile floating action button */}
-      <button
-        type="button"
-        onClick={() => setAdding(true)}
-        aria-label="Add staff"
-        className="fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 outline-none transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:hidden"
-      >
-        <Plus size={24} strokeWidth={2} />
-      </button>
+      {!atLimit && <Fab label="Add staff" onClick={addStaff} />}
+      <div aria-hidden className="h-16 sm:hidden" />
 
-      {/* The form is a focus-trapped bottom sheet on phones, so it never pushes the list around */}
       {adding && (
-        <Modal onClose={() => setAdding(false)} titleId="staff-form-title" title="New staff member" maxWidth="max-w-lg">
-          <StaffForm
-            businessId={business.id}
-            onDone={(saved) => {
-              setAdding(false)
-              if (saved) reload()
-            }}
-          />
-        </Modal>
+        <StaffSheet
+          businessId={business.id}
+          onDone={(saved) => {
+            setAdding(false)
+            if (saved) reload()
+          }}
+        />
       )}
     </div>
   )

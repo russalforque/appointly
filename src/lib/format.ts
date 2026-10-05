@@ -20,6 +20,10 @@ export function addDays(date: string, n: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** 'Today' / 'Tomorrow' / 'Yesterday', otherwise 'Mon, Oct 12' — how people scan a list of days. */
+export const relativeDay = (date: string, today: string) =>
+  date === today ? 'Today' : date === addDays(today, 1) ? 'Tomorrow' : date === addDays(today, -1) ? 'Yesterday' : fmtDay(date)
+
 /** Monday of the week containing `date`. */
 export function weekStartOf(date: string): string {
   const dow = new Date(`${date}T00:00:00Z`).getUTCDay()
@@ -58,30 +62,6 @@ export const fmtPeso = (amount: number) =>
 /** Up to 2 initials from a display name, for avatar badges. */
 export const initials = (name: string) =>
   name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?'
-
-/**
- * A Date whose local getters (getFullYear/getHours/...) equal the wall-clock time in `tz`.
- * react-big-calendar reads Date fields with the browser's own local getters, so this lets us
- * feed it business-timezone time without depending on the viewer's system timezone.
- */
-export function toBusinessLocalDate(iso: string | Date, tz: string): Date {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date(iso))
-  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0)
-  return new Date(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'))
-}
-
-/** 'YYYY-MM-DD' from a Date's own local getters (pairs with toBusinessLocalDate). */
-export const localDateKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /** Short relative age for feeds, e.g. "just now", "5m ago", "3h ago", "2d ago". */
 export function fmtRelative(iso: string, now: Date = new Date()): string {

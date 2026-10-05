@@ -1,47 +1,50 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
-  Building2,
-  CalendarCheck,
-  CalendarDays,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ClipboardList,
-  Clock3,
-  CreditCard,
-  LayoutDashboard,
+  Copy,
+  ExternalLink,
   LockKeyhole,
   LogOut,
-  Menu,
   Search,
-  Settings2,
+  Share,
   ShieldCheck,
-  Users,
-  UserRound,
-  X,
-  type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '../../auth/auth'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
 import { initials } from '../../lib/format'
-import { billingStatusLabel, fetchPlans, fetchSubscription, hasBillingAccess, hasCapability } from '../../lib/billing'
+import {
+  billingStatusLabel,
+  fetchPlans,
+  fetchSubscription,
+  hasBillingAccess,
+  hasCapability,
+  staffLimit,
+} from '../../lib/billing'
 import { isPlatformAdmin } from '../../lib/admin'
 import { useLoad } from '../../lib/useLoad'
-import type { Business, Subscription } from '../../lib/types'
-import { Bone, ErrorText } from '../../components/Status'
+import { useMediaQuery } from '../../lib/useMediaQuery'
+import { shareLink } from '../../lib/share'
+import { useToast } from '../../lib/toast'
+import type { Business } from '../../lib/types'
+import { Bone, ErrorState } from '../../components/Status'
 import NotificationBell from '../../components/NotificationBell'
 import Logo from '../../components/Logo'
-import type { PlanAccess } from './useBusiness'
+import type { BillingContext, PlanAccess } from './useBusiness'
 import CreateBusiness from './CreateBusiness'
+import { NAV_SECTIONS, pageLabelFor, type NavEntry } from './nav'
+import { BottomNav, BusinessMark, MoreSheet } from './MobileNav'
 
 const SIDEBAR_COLLAPSED_KEY = 'appointly:sidebar-collapsed'
 
 function DashboardShellSkeleton() {
   return (
     <div className="font-dashboard min-h-screen bg-neutral-50">
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-neutral-200 bg-white md:block">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-18 overflow-hidden border-r border-neutral-200 bg-white md:block lg:w-64">
         <div className="flex h-full animate-pulse flex-col gap-4 px-3 py-4">
           <div className="space-y-3 px-1">
             <div className="flex items-center gap-2.5">
@@ -61,45 +64,25 @@ function DashboardShellSkeleton() {
           </div>
         </div>
       </aside>
-      <main className="min-w-0 p-4 sm:p-6 md:ml-64 md:p-8">
+      {/* Phones: the same top bar and tab bar the loaded shell has, so nothing jumps on arrival */}
+      <div className="flex h-14 items-center gap-2.5 border-b border-neutral-200 bg-white px-4 md:hidden" aria-hidden>
+        <Bone className="h-8 w-8 rounded-xl" />
+        <Bone className="h-3.5 w-28" />
+      </div>
+      <main className="min-w-0 p-4 sm:p-6 md:ml-18 lg:ml-64 xl:p-8">
         <div className="mx-auto max-w-6xl animate-pulse space-y-2" aria-busy="true" aria-label="Loading">
           <Bone className="h-3.5 w-32" />
           <Bone className="h-7 w-64" />
         </div>
       </main>
+      <div className="fixed inset-x-0 bottom-0 flex h-16 items-center justify-around border-t border-neutral-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden" aria-hidden>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Bone key={i} className="h-6 w-6 rounded-lg" />
+        ))}
+      </div>
     </div>
   )
 }
-
-type NavEntry = { to: string; end?: boolean; label: string; icon: LucideIcon }
-
-const NAV_SECTIONS: { label: string; items: NavEntry[] }[] = [
-  {
-    label: 'Main',
-    items: [
-      { to: '/dashboard', end: true, label: 'Dashboard', icon: LayoutDashboard },
-      { to: '/dashboard/calendar', label: 'Calendar', icon: CalendarDays },
-      { to: '/dashboard/bookings', label: 'Bookings', icon: CalendarCheck },
-      { to: '/dashboard/customers', label: 'Customers', icon: Users },
-    ],
-  },
-  {
-    label: 'Business',
-    items: [
-      { to: '/dashboard/profile', label: 'Business Profile', icon: Building2 },
-      { to: '/dashboard/hours', label: 'Business Hours', icon: Clock3 },
-      { to: '/dashboard/services', label: 'Services', icon: ClipboardList },
-      { to: '/dashboard/staff', label: 'Staff', icon: UserRound },
-    ],
-  },
-  {
-    label: 'Account',
-    items: [
-      { to: '/dashboard/booking-settings', label: 'Settings', icon: Settings2 },
-      { to: '/dashboard/billing', label: 'Billing', icon: CreditCard },
-    ],
-  },
-]
 
 function NavItem({
   to,
@@ -145,6 +128,100 @@ function NavItem({
         </>
       )}
     </NavLink>
+  )
+}
+
+const headerIconBtn =
+  'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-neutral-600 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-9 sm:w-9 sm:rounded-lg'
+
+/** The public booking link — the thing owners share most — kept one click away on every page. */
+function BookingLinkActions({ url, name }: { url: string; name: string }) {
+  const toast = useToast()
+  const [copied, setCopied] = useState(false)
+  const display = url.replace(/^https?:\/\//, '')
+
+  useEffect(() => {
+    if (!copied) return
+    const id = setTimeout(() => setCopied(false), 2000)
+    return () => clearTimeout(id)
+  }, [copied])
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  const copyIcon = copied ? (
+    <Check size={15} strokeWidth={2} className="text-green-600" />
+  ) : (
+    <Copy size={15} strokeWidth={1.75} />
+  )
+
+  return (
+    <>
+      {/* Wide screens: the link itself, so owners can see what they are sharing */}
+      <div className="hidden h-9 min-w-0 items-center rounded-lg border border-neutral-200 bg-neutral-50 pl-3 lg:flex">
+        <span className="max-w-56 truncate text-xs text-neutral-500 xl:max-w-72" title={url}>
+          {display}
+        </span>
+        <button
+          type="button"
+          onClick={copy}
+          className="ml-2 flex h-full shrink-0 items-center gap-1.5 border-l border-neutral-200 px-2.5 text-xs font-medium text-neutral-700 outline-none transition-colors hover:bg-white hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600"
+        >
+          {copyIcon}
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          title="Open booking page"
+          aria-label="Open booking page in a new tab"
+          className="flex h-full shrink-0 items-center rounded-r-lg border-l border-neutral-200 px-2.5 text-neutral-500 outline-none transition-colors hover:bg-white hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600"
+        >
+          <ExternalLink size={15} strokeWidth={1.75} />
+        </a>
+      </div>
+
+      {/* Phones: one Share button that opens the system share sheet — how links actually get sent */}
+      <button
+        type="button"
+        onClick={() => shareLink(url, name, toast)}
+        aria-label="Share booking link"
+        className={`${headerIconBtn} md:hidden`}
+      >
+        <Share size={19} strokeWidth={1.75} />
+      </button>
+
+      {/* Tablets: copy and open as icons */}
+      <button
+        type="button"
+        onClick={copy}
+        title="Copy booking link"
+        aria-label="Copy booking link"
+        className={`${headerIconBtn} hidden md:flex lg:hidden`}
+      >
+        {copyIcon}
+      </button>
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        title="Open booking page"
+        aria-label="Open booking page in a new tab"
+        className={`${headerIconBtn} hidden md:flex lg:hidden`}
+      >
+        <ExternalLink size={17} strokeWidth={1.75} />
+      </a>
+      <span className="sr-only" aria-live="polite">
+        {copied ? 'Booking link copied' : ''}
+      </span>
+    </>
   )
 }
 
@@ -217,7 +294,7 @@ function SidebarContent({
         >
           <Logo className="h-8 w-8" />
           {!collapsed && (
-            <span className="truncate text-[15px] font-semibold tracking-tight text-neutral-900">Appointly</span>
+            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-tight text-neutral-900">Appointly</span>
           )}
         </div>
         {!collapsed && (
@@ -245,13 +322,13 @@ function SidebarContent({
 
       {locked &&
         (collapsed ? (
-          <div className="flex justify-center" title="Your trial has ended. Choose a plan to unlock your dashboard.">
+          <div className="flex justify-center" title="Your plan has ended. Choose a plan to unlock your dashboard.">
             <LockKeyhole size={16} className="shrink-0 text-amber-500" strokeWidth={1.75} />
           </div>
         ) : (
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-snug text-amber-700">
             <LockKeyhole size={14} className="mt-0.5 shrink-0" strokeWidth={1.75} />
-            Your trial has ended. Choose a plan to unlock your dashboard.
+            Your plan has ended. Choose a plan to unlock your dashboard.
           </div>
         ))}
 
@@ -341,7 +418,8 @@ function SidebarContent({
 export default function DashboardLayout() {
   const { session, loading: authLoading } = useAuth()
   const userId = session?.user.id
-  const [mobileOpen, setMobileOpen] = useState(false)
+  // Phones: the More sheet holds everything that is not a daily tab.
+  const [moreOpen, setMoreOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
@@ -350,6 +428,21 @@ export default function DashboardLayout() {
     }
   })
   const location = useLocation()
+  // Tablets (md–lg) get the icon rail by default: a 256px sidebar leaves too little room beside it.
+  // Expanding it there overlays the page instead of squeezing it; the saved preference is desktop-only.
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  const [tabletExpanded, setTabletExpanded] = useState(false)
+  const rail = isDesktop ? collapsed : !tabletExpanded
+  const overlayOpen = !isDesktop && tabletExpanded
+
+  useEffect(() => {
+    if (!overlayOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTabletExpanded(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [overlayOpen])
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -362,20 +455,6 @@ export default function DashboardLayout() {
       return next
     })
   }, [])
-
-  useEffect(() => {
-    if (!mobileOpen) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    const prevOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = prevOverflow
-    }
-  }, [mobileOpen])
 
   // First business the user belongs to (MVP: one business per user)
   const load = useCallback(async () => {
@@ -397,12 +476,18 @@ export default function DashboardLayout() {
       business,
       timezone: settings.timezone,
       billingLabel: billingStatusLabel(subscription, plans),
-      // Resolved once here so every page can gate on it without re-querying the plan.
+      // Resolved once here so every page can gate on it without re-querying the plan. The
+      // database enforces the same rules; this only decides what to draw.
       can: {
         notifications: hasCapability(subscription, plans, 'notifications'),
+        reminders: hasCapability(subscription, plans, 'reminders'),
         advancedBooking: hasCapability(subscription, plans, 'advanced_booking'),
+        bookingPolicies: hasCapability(subscription, plans, 'booking_policies'),
+        staffAvailability: hasCapability(subscription, plans, 'staff_availability'),
+        analytics: hasCapability(subscription, plans, 'analytics'),
+        staffLimit: staffLimit(subscription, plans),
       },
-      subscription,
+      billing: { subscription, plans },
       platformAdmin,
     }
   }, [userId])
@@ -412,23 +497,48 @@ export default function DashboardLayout() {
         business: Business
         timezone: string
         billingLabel: string
-        subscription: Subscription | null
         can: PlanAccess
+        billing: BillingContext
         platformAdmin: boolean
       }
     | null
   >(load)
 
+  // Approving a payment, an admin plan change or a switch made in another tab all land on the
+  // subscription row: re-resolve the plan the moment it changes, so features unlock (or lock)
+  // without a refresh.
+  const businessId = data?.business?.id
+  useEffect(() => {
+    if (!businessId) return
+    const channel = supabase
+      .channel(`subscription:${businessId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'subscriptions', filter: `business_id=eq.${businessId}` },
+        () => reload(),
+      )
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [businessId, reload])
+
   if (authLoading) return <DashboardShellSkeleton />
   if (!session) return <Navigate to="/login" replace />
   if (loading) return <DashboardShellSkeleton />
-  if (error) return <ErrorText message={error} />
+  if (error)
+    return (
+      <div className="font-dashboard grid min-h-dvh place-items-center bg-neutral-50 p-4">
+        <ErrorState message={error} onRetry={reload} />
+      </div>
+    )
   if (!data) return <CreateBusiness onCreated={reload} />
   if (!data.business) return data.platformAdmin ? <Navigate to="/admin" replace /> : <CreateBusiness onCreated={reload} />
-  const { business, timezone, billingLabel, subscription, can, platformAdmin } = data
-  const locked = !hasBillingAccess(subscription)
+  const { business, timezone, billingLabel, can, billing, platformAdmin } = data
+  const locked = !hasBillingAccess(billing.subscription)
   const userLabel = (session!.user.user_metadata?.full_name as string | undefined)?.trim() || session!.user.email || 'Account'
   const userEmail = session!.user.email ?? ''
+  const bookingUrl = `${window.location.origin}/book/${business.slug}`
 
   if (locked && !location.pathname.startsWith('/dashboard/billing')) {
     return <Navigate to="/dashboard/billing" replace />
@@ -436,88 +546,105 @@ export default function DashboardLayout() {
 
   return (
     <div className="font-dashboard min-h-screen bg-neutral-50">
+      {/* Tablet: an expanded sidebar floats over the page, so a tap outside puts it away */}
+      {overlayOpen && (
+        <div className="fixed inset-0 z-20 hidden bg-black/20 md:block" onClick={() => setTabletExpanded(false)} aria-hidden="true" />
+      )}
+
       {/* Desktop / tablet sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 z-30 hidden border-r border-neutral-200 bg-white transition-[width] duration-200 md:block ${
-          collapsed ? 'w-18' : 'w-64'
-        }`}
+          rail ? 'w-18' : 'w-64'
+        } ${overlayOpen ? 'shadow-xl' : ''}`}
       >
         <SidebarContent
           business={business}
           billingLabel={billingLabel}
           locked={locked}
           isPlatformAdmin={platformAdmin}
-          collapsed={collapsed}
-          onNavigate={() => {}}
+          collapsed={rail}
+          onNavigate={() => setTabletExpanded(false)}
           onSignOut={() => supabase.auth.signOut()}
           userLabel={userLabel}
           userEmail={userEmail}
         />
         <button
-          onClick={toggleCollapsed}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="absolute -right-3 top-6 flex h-6 w-6 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-500 outline-none transition-colors hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+          onClick={isDesktop ? toggleCollapsed : () => setTabletExpanded((v) => !v)}
+          aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!rail}
+          title={rail ? 'Expand sidebar' : 'Collapse sidebar'}
+          // The visible disc stays small; the ::before pad gives it a finger-sized hit area on tablets.
+          className="absolute -right-3.5 top-6 flex h-7 w-7 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-500 outline-none transition-colors before:absolute before:-inset-2 before:content-[''] hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
         >
-          {collapsed ? <ChevronRight size={14} strokeWidth={2} /> : <ChevronLeft size={14} strokeWidth={2} />}
+          {rail ? <ChevronRight size={14} strokeWidth={2} /> : <ChevronLeft size={14} strokeWidth={2} />}
         </button>
       </aside>
 
-      {/* Mobile top bar */}
-      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-neutral-200 bg-white px-4 md:hidden">
-        <button
-          className="-ml-2.5 flex h-11 w-11 items-center justify-center rounded-lg text-neutral-600 outline-none hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-neutral-900"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-        >
-          <Menu size={20} />
-        </button>
-        <p className="flex-1 truncate text-sm font-semibold text-neutral-900">{business.name}</p>
-        {can.notifications && <NotificationBell businessId={business.id} timezone={timezone} />}
-      </header>
+      <div className={`min-w-0 transition-[margin] duration-200 md:ml-18 ${collapsed ? 'lg:ml-18' : 'lg:ml-64'}`}>
+        {/* Top bar — where you are on the left, booking link + notifications on the right */}
+        <header className="sticky top-0 z-15 flex h-14 items-center gap-1 border-b border-neutral-200 bg-white/95 px-4 backdrop-blur sm:gap-2 sm:px-6 xl:px-8">
+          {/* Phones: whose dashboard this is. The page title says where you are; the tab bar, how to move. */}
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 md:hidden">
+            <BusinessMark business={business} className="h-8 w-8 text-xs" />
+            <span className="truncate text-[15px] font-semibold tracking-tight text-neutral-900">{business.name}</span>
+          </div>
 
-      {/* Mobile drawer */}
-      <div
-        className={`fixed inset-0 z-40 md:hidden ${mobileOpen ? '' : 'pointer-events-none'}`}
-        aria-hidden={!mobileOpen}
-      >
-        <div
-          className={`absolute inset-0 bg-black/50 transition-opacity ${mobileOpen ? 'opacity-100' : 'opacity-0'}`}
-          onClick={() => setMobileOpen(false)}
-        />
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Menu"
-          className={`absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col bg-white shadow-xl transition-transform duration-200 ${
-            mobileOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
+          {/* Tablet and up: a breadcrumb */}
+          <nav aria-label="Breadcrumb" className="hidden min-w-0 flex-1 md:block">
+            <ol className="flex min-w-0 items-center gap-1.5 text-sm">
+              <li className="min-w-0 truncate text-neutral-500">{business.name}</li>
+              <li aria-hidden className="shrink-0 text-neutral-300">
+                <ChevronRight size={14} strokeWidth={2} />
+              </li>
+              <li aria-current="page" className="min-w-0 truncate font-semibold text-neutral-900">
+                {pageLabelFor(location.pathname)}
+              </li>
+            </ol>
+          </nav>
+
+          {!locked && <BookingLinkActions url={bookingUrl} name={business.name} />}
+
+          {/* Every plan gets the bell: billing notices (payment verified, plan changed) go here too.
+              Booking notifications are only written for plans that include them. */}
+          <span aria-hidden className="mx-1 hidden h-6 w-px bg-neutral-200 sm:block" />
+          <NotificationBell businessId={business.id} timezone={timezone} />
+
+
+          {/* A locked account has no tab bar, so signing out has to stay reachable on a phone */}
+          {locked && (
+            <button
+              type="button"
+              onClick={() => supabase.auth.signOut()}
+              className="-mr-1.5 flex h-11 shrink-0 items-center gap-1.5 rounded-xl px-2.5 text-sm font-medium text-neutral-600 outline-none hover:bg-neutral-100 focus-visible:ring-2 focus-visible:ring-brand-600 md:hidden"
+            >
+              <LogOut size={17} strokeWidth={1.75} aria-hidden /> Sign out
+            </button>
+          )}
+        </header>
+
+        <main
+          className={`min-w-0 p-4 sm:p-6 md:pb-6 xl:p-8 ${locked ? 'pb-[calc(1.5rem+env(safe-area-inset-bottom))]' : 'pb-bottom-bar'}`}
         >
-          <button
-            className="absolute right-1.5 top-2.5 z-10 flex h-10 w-10 items-center justify-center rounded-lg text-neutral-400 outline-none transition-colors hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600"
-            onClick={() => setMobileOpen(false)}
-            aria-label="Close menu"
-          >
-            <X size={18} />
-          </button>
-          <SidebarContent
-            business={business}
-            billingLabel={billingLabel}
-            locked={locked}
-            isPlatformAdmin={platformAdmin}
-            onNavigate={() => setMobileOpen(false)}
-            onSignOut={() => supabase.auth.signOut()}
-            userLabel={userLabel}
-            userEmail={userEmail}
-          />
-        </div>
+          <Outlet context={{ business, timezone, can, billing, reload }} />
+        </main>
       </div>
 
-      <main
-        className={`min-w-0 p-4 transition-[margin] duration-200 sm:p-6 md:p-8 ${collapsed ? 'md:ml-18' : 'md:ml-64'}`}
-      >
-        <Outlet context={{ business, timezone, can, reload }} />
-      </main>
+      {!locked && <BottomNav onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />}
+      {moreOpen && (
+        <MoreSheet
+          business={business}
+          billingLabel={billingLabel}
+          platformAdmin={platformAdmin}
+          userLabel={userLabel}
+          userEmail={userEmail}
+          bookingUrl={bookingUrl}
+          onClose={() => setMoreOpen(false)}
+          onSignOut={() => {
+            setMoreOpen(false)
+            supabase.auth.signOut()
+          }}
+        />
+      )}
     </div>
   )
 }

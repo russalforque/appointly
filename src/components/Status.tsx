@@ -1,8 +1,64 @@
-import { Check } from 'lucide-react'
-import { panel } from '../lib/ui'
+import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { Check, Loader2, RefreshCw, SearchX, WifiOff, type LucideIcon } from 'lucide-react'
+import { actionSecondary, panel } from '../lib/ui'
 
+/** Whole-screen wait (route chunks, public pages). Pages with a known shape use skeletons instead. */
 export function Loading() {
-  return <p className="p-6 text-sm text-slate-500">Loading…</p>
+  return (
+    <div className="grid min-h-[60dvh] place-items-center" role="status" aria-label="Loading">
+      <Loader2 size={24} className="animate-spin text-neutral-300" aria-hidden />
+    </div>
+  )
+}
+
+/**
+ * The one empty-state pattern: a quiet icon, what is missing, why it matters, and the single
+ * next step. Sits inside whatever surface the list would have filled.
+ */
+export function EmptyState({
+  icon: Icon,
+  title,
+  body,
+  action,
+  className = '',
+}: {
+  icon: LucideIcon
+  title: string
+  body?: string
+  action?: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`flex flex-col items-center px-6 py-12 text-center sm:py-16 ${className}`}>
+      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-100 text-neutral-400">
+        <Icon size={22} strokeWidth={1.75} aria-hidden />
+      </span>
+      <p className="mt-4 text-[15px] font-semibold text-neutral-900">{title}</p>
+      {body && <p className="mt-1 max-w-xs text-sm leading-relaxed text-neutral-500">{body}</p>}
+      {action && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{action}</div>}
+    </div>
+  )
+}
+
+/** A page whose data failed to load: says so plainly and offers the retry, instead of a dead end. */
+export function ErrorState({ message, onRetry }: { message: string | null; onRetry?: () => void }) {
+  return (
+    <div className={`${panel} mx-auto max-w-md`}>
+      <EmptyState
+        icon={WifiOff}
+        title="Couldn't load this page"
+        body={message ?? 'Something went wrong. Check your connection and try again.'}
+        action={
+          onRetry && (
+            <button type="button" onClick={onRetry} className={actionSecondary}>
+              <RefreshCw size={15} strokeWidth={2} aria-hidden /> Try again
+            </button>
+          )
+        }
+      />
+    </div>
+  )
 }
 
 /** Base pulsing placeholder block. Compose with width/height utility classes. */
@@ -73,18 +129,6 @@ export function ListSkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 /** Placeholder matching the calendar grid's panel dimensions. */
-export function CalendarSkeleton() {
-  return (
-    <div className={`${panel} !p-2 sm:!p-3`} aria-busy="true" aria-label="Loading calendar">
-      <div className="grid h-[560px] animate-pulse grid-cols-7 gap-1 sm:h-[680px] lg:h-[calc(100vh-25rem)] lg:min-h-150 2xl:h-[calc(100vh-24rem)] 2xl:min-h-180">
-        {Array.from({ length: 35 }).map((_, i) => (
-          <div key={i} className="rounded bg-neutral-100" />
-        ))}
-      </div>
-    </div>
-  )
-}
-
 /** Placeholder for form-heavy settings pages built from one or more panel sections. */
 export function FormSkeleton({ sections = 1, fieldsPerSection = 3 }: { sections?: number; fieldsPerSection?: number }) {
   return (
@@ -101,6 +145,27 @@ export function FormSkeleton({ sections = 1, fieldsPerSection = 3 }: { sections?
         </div>
       ))}
     </div>
+  )
+}
+
+/** Full-page dead end for public links (unknown booking page, expired booking link), with a way out. */
+export function NotFoundPage({ title, body }: { title: string; body: string }) {
+  return (
+    <main className="font-site grid min-h-dvh place-items-center bg-slate-50 px-4 py-12">
+      <div className="w-full max-w-sm text-center">
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-white text-slate-400 shadow-sm">
+          <SearchX size={22} strokeWidth={1.75} aria-hidden="true" />
+        </span>
+        <h1 className="mt-4 text-xl font-semibold tracking-tight text-slate-900">{title}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">{body}</p>
+        <Link
+          to="/"
+          className="mt-6 inline-flex min-h-11 items-center justify-center rounded-full border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10"
+        >
+          Go to Appointly
+        </Link>
+      </div>
+    </main>
   )
 }
 

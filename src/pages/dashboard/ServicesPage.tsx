@@ -1,15 +1,20 @@
 import { Fragment, useCallback, useMemo, useState, type ChangeEvent, type FormEvent } from 'react'
-import { Clock3, Eye, EyeOff, ImagePlus, Layers, Pencil, Plus, Scissors, Search, Users, X, type LucideIcon } from 'lucide-react'
+import { Clock3, Eye, EyeOff, ImagePlus, Layers, Loader2, Pencil, Plus, Scissors, Search, Users, X, type LucideIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { formStr, unwrap, friendlyError } from '../../lib/db'
 import { useLoad } from '../../lib/useLoad'
+import { useToast } from '../../lib/toast'
 import { fmtDuration, fmtPeso } from '../../lib/format'
-import { btn, btnGhost, input, panel } from '../../lib/ui'
+import { actionPrimary, actionSecondary, btnGhost, input, panel } from '../../lib/ui'
 import type { Service, Staff } from '../../lib/types'
 import Field from '../../components/Field'
 import Modal from '../../components/Modal'
 import Switch from '../../components/Switch'
-import { ErrorText, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
+import PageHeader from '../../components/PageHeader'
+import SearchField from '../../components/SearchField'
+import SegmentedTabs from '../../components/SegmentedTabs'
+import Fab from '../../components/Fab'
+import { EmptyState, ErrorState, ErrorText, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
 import { useBusiness } from './useBusiness'
 
 type StatusFilter = 'all' | 'active' | 'inactive'
@@ -22,6 +27,8 @@ const STATUS_TABS: { value: StatusFilter; label: string }[] = [
 
 const DURATION_PRESETS = [15, 30, 45, 60, 90]
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+/** What the service-images bucket accepts (0025); anything else is refused by Storage. */
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 function Stat({
   label,
@@ -90,7 +97,7 @@ function ServiceCard({
   onToggle: () => void
 }) {
   return (
-    <li className="relative sm:hidden">
+    <li className="relative lg:hidden">
       <button
         type="button"
         onClick={onEdit}
@@ -150,7 +157,7 @@ function ServiceRow({
   onToggle: () => void
 }) {
   return (
-    <li className="hidden items-center gap-4 py-3 sm:flex">
+    <li className="hidden items-center gap-4 py-3 lg:flex">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <ServiceThumb service={service} className="h-10 w-10 rounded-lg" />
         <div className="min-w-0">
@@ -164,7 +171,7 @@ function ServiceRow({
       </span>
       <span className="w-24 text-right text-sm text-neutral-700">{fmtDuration(service.duration_minutes)}</span>
 
-      <span className="flex w-20 items-center justify-center gap-1 text-sm text-neutral-700" title={staffNames.join(', ')}>
+      <span className="hidden w-20 items-center justify-center gap-1 text-sm text-neutral-700 xl:flex" title={staffNames.join(', ')}>
         <Users size={13} strokeWidth={1.75} className="text-neutral-400" />
         {staffNames.length || '—'}
       </span>
@@ -195,7 +202,9 @@ function ServiceRow({
   )
 }
 
-function ServiceForm({ businessId, service, onDone }: { businessId: string; service: Service | null; onDone: (saved: boolean) => void }) {
+/** Add or edit a service, as a sheet with Save pinned below the fields. */
+function ServiceSheet({ businessId, service, onDone }: { businessId: string; service: Service | null; onDone: (saved: boolean) => void }) {
+  const toast = useToast()
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -208,8 +217,8 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (!file.type.startsWith('image/')) {
-      setError('Please choose an image file.')
+    if (!IMAGE_TYPES.includes(file.type)) {
+      setError('Please choose a JPG, PNG or WebP image.')
       return
     }
     if (file.size > MAX_IMAGE_BYTES) {
@@ -230,6 +239,7 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (saving) return
     const f = new FormData(e.currentTarget)
     setSaving(true)
     let imageUrl = removeImage ? null : (service?.image_url ?? null)
@@ -258,27 +268,48 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
       : await supabase.from('services').insert({ ...row, business_id: businessId })
     setSaving(false)
     if (error) setError(friendlyError(error.message))
-    else onDone(true)
+    else {
+      toast(service ? 'Service updated' : 'Service added')
+      onDone(true)
+    }
   }
 
   const durationOptions = DURATION_PRESETS.includes(duration) ? DURATION_PRESETS : [...DURATION_PRESETS, duration].sort((a, b) => a - b)
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <Modal
+      onClose={() => onDone(false)}
+      titleId="service-form-title"
+      title={service ? 'Edit service' : 'New service'}
+      maxWidth="max-w-lg"
+      footer={
+        <div className="flex gap-2">
+          <button type="button" className={`${actionSecondary} flex-none`} onClick={() => onDone(false)}>
+            Cancel
+          </button>
+          <button form="service-form" className={`${actionPrimary} flex-1`} disabled={saving}>
+            {saving && <Loader2 size={16} className="animate-spin" aria-hidden />}
+            {saving ? 'Saving…' : service ? 'Save changes' : 'Add service'}
+          </button>
+        </div>
+      }
+    >
+    <form id="service-form" onSubmit={submit} className="space-y-4">
       <Field label="Service name">
-        <input name="name" required defaultValue={service?.name} placeholder="e.g. Haircut" className={`${input} h-12 sm:h-auto`} />
+        <input name="name" required maxLength={200} defaultValue={service?.name} placeholder="e.g. Haircut" className={`${input} h-12 sm:h-auto`} />
       </Field>
 
       <Field label="Description" hint="Shown to customers on your booking page.">
         <input
           name="description"
+          maxLength={2000}
           defaultValue={service?.description ?? ''}
           placeholder="e.g. Wash, cut and style"
           className={`${input} h-12 sm:h-auto`}
         />
       </Field>
 
-      <Field label="Photo" hint="Optional. JPG or PNG, up to 5MB.">
+      <Field label="Photo" hint="Optional. JPG, PNG or WebP, up to 5MB.">
         <div className="flex items-center gap-3">
           {imagePreview ? (
             <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-neutral-200">
@@ -296,13 +327,13 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
             <label className="flex h-20 flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-300 text-sm font-medium text-neutral-500 transition-colors hover:border-neutral-400 hover:bg-neutral-50">
               <ImagePlus size={18} strokeWidth={1.75} />
               Add a photo
-              <input type="file" accept="image/*" onChange={pickImage} className="hidden" />
+              <input type="file" accept={IMAGE_TYPES.join(',')} onChange={pickImage} className="hidden" />
             </label>
           )}
           {imagePreview && (
             <label className={`${btnGhost} flex h-11 cursor-pointer items-center px-4`}>
               Replace
-              <input type="file" accept="image/*" onChange={pickImage} className="hidden" />
+              <input type="file" accept={IMAGE_TYPES.join(',')} onChange={pickImage} className="hidden" />
             </label>
           )}
         </div>
@@ -328,6 +359,7 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
         <input
           type="number"
           min={5}
+          max={1440}
           step={5}
           required
           inputMode="numeric"
@@ -356,6 +388,7 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
             name="buffer"
             type="number"
             min={0}
+            max={480}
             step={5}
             inputMode="numeric"
             defaultValue={service?.buffer_minutes ?? 0}
@@ -382,16 +415,8 @@ function ServiceForm({ businessId, service, onDone }: { businessId: string; serv
       )}
 
       <ErrorText message={error} />
-
-      <div className="flex gap-2 pt-1">
-        <button type="button" className={`${btnGhost} h-11 flex-none px-4`} onClick={() => onDone(false)}>
-          Cancel
-        </button>
-        <button className={`${btn} h-11 flex-1`} disabled={saving}>
-          {saving ? 'Saving…' : service ? 'Save changes' : 'Add service'}
-        </button>
-      </div>
     </form>
+    </Modal>
   )
 }
 
@@ -416,6 +441,7 @@ export default function ServicesPage() {
     return { services, staffByService }
   }, [business.id])
   const { data, loading, error, reload } = useLoad(load)
+  const toast = useToast()
   const [editing, setEditing] = useState<Service | 'new' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -424,6 +450,7 @@ export default function ServicesPage() {
   async function toggle(s: Service) {
     const { error } = await supabase.from('services').update({ is_active: !s.is_active }).eq('id', s.id)
     setActionError(error ? friendlyError(error.message) : null)
+    if (!error) toast(s.is_active ? `${s.name} hidden from your booking page` : `${s.name} is bookable again`)
     reload()
   }
 
@@ -449,15 +476,18 @@ export default function ServicesPage() {
     return (
       <div className="mx-auto max-w-6xl space-y-4">
         <PageHeaderSkeleton withAction />
-        <StatGridSkeleton />
+        <div className="hidden sm:block">
+          <StatGridSkeleton />
+        </div>
         <ListSkeleton />
       </div>
     )
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />
 
   const services = data?.services ?? []
   const hasServices = services.length > 0
   const isFiltering = status !== 'all' || query.trim() !== ''
-  const tabCounts: Record<StatusFilter, number> = { all: summary.total, active: summary.active, inactive: summary.inactive }
+  const tabs = STATUS_TABS.map((t) => ({ ...t, count: { all: summary.total, active: summary.active, inactive: summary.inactive }[t.value] }))
 
   function clearFilters() {
     setStatus('all')
@@ -465,19 +495,20 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-0">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Services</h1>
-          <p className="mt-1 text-sm text-neutral-500">Manage the services your customers can book.</p>
-        </div>
-        <button className={`${btn} hidden items-center gap-1.5 sm:inline-flex`} onClick={() => setEditing('new')}>
-          <Plus size={16} strokeWidth={1.75} /> Add Service
-        </button>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-5">
+      <PageHeader
+        title="Services"
+        subtitle="Manage the services your customers can book."
+        actions={
+          <button className={actionPrimary} onClick={() => setEditing('new')}>
+            <Plus size={16} strokeWidth={2} /> Add service
+          </button>
+        }
+      />
 
+      {/* Phones read the counts off the filter tabs instead */}
       {hasServices && (
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 sm:gap-3">
+        <div className="hidden gap-3 sm:grid sm:grid-cols-4">
           <Stat label="Total services" value={summary.total} icon={Layers} tint="bg-indigo-50" iconColor="text-indigo-600" />
           <Stat label="Active" value={summary.active} icon={Eye} tint="bg-green-50" iconColor="text-green-600" />
           <Stat label="Inactive" value={summary.inactive} icon={EyeOff} tint="bg-neutral-100" iconColor="text-neutral-500" />
@@ -488,76 +519,49 @@ export default function ServicesPage() {
       <ErrorText message={error ?? actionError} />
 
       {hasServices && (
-        <div className="flex flex-col gap-2.5 sm:flex-row-reverse sm:items-center sm:justify-between sm:gap-3">
-          <div className="relative min-w-0 sm:w-64 sm:flex-none">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search services…"
-              aria-label="Search services"
-              className={`${input} !h-11 !rounded-full !border-neutral-300 !pl-10 sm:!h-9 sm:!pl-9`}
-            />
-          </div>
-
-          {/* Counts on the tabs make the filter's effect predictable before tapping it */}
-          <div className="no-scrollbar -mx-4 flex gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <div className="flex flex-none items-center gap-1 rounded-full bg-neutral-100 p-1">
-              {STATUS_TABS.map((tab) => (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => setStatus(tab.value)}
-                  aria-pressed={status === tab.value}
-                  className={`flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:py-1.5 ${
-                    status === tab.value ? 'bg-white text-brand-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-900'
-                  }`}
-                >
-                  {tab.label}
-                  <span className={`ml-1.5 text-xs ${status === tab.value ? 'text-brand-500' : 'text-neutral-400'}`}>
-                    {tabCounts[tab.value]}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+        <div className="space-y-2.5 sm:flex sm:flex-row-reverse sm:items-center sm:justify-between sm:gap-3 sm:space-y-0">
+          <SearchField value={query} onChange={setQuery} placeholder="Search services" label="Search services" className="sm:w-64" />
+          <SegmentedTabs options={tabs} value={status} onChange={setStatus} label="Filter services" />
         </div>
       )}
 
       {!hasServices ? (
-        <div className={`${panel} space-y-3 py-10 text-center`}>
-          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-600">
-            <Scissors size={20} strokeWidth={1.75} />
-          </span>
-          <div>
-            <p className="text-sm font-medium text-neutral-800">No services yet</p>
-            <p className="mt-1 text-sm text-neutral-500">Add your first service so customers can start booking.</p>
-          </div>
-          <button className={`${btn} inline-flex h-11 items-center gap-1.5`} onClick={() => setEditing('new')}>
-            <Plus size={16} strokeWidth={1.75} /> Add Service
-          </button>
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Scissors}
+            title="No services yet"
+            body="Add what you offer — customers can only book services that exist here."
+            action={
+              <button className={actionPrimary} onClick={() => setEditing('new')}>
+                <Plus size={16} strokeWidth={2} /> Add your first service
+              </button>
+            }
+          />
         </div>
       ) : filtered.length === 0 ? (
-        <div className={`${panel} space-y-3 py-10 text-center`}>
-          <div>
-            <p className="text-sm font-medium text-neutral-800">No services match</p>
-            <p className="mt-1 text-sm text-neutral-500">Try a different search term or filter.</p>
-          </div>
-          <button type="button" className={`${btnGhost} inline-flex h-11 items-center px-4`} onClick={clearFilters}>
-            Clear filters
-          </button>
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Search}
+            title="No services match"
+            body="Try a different search term or filter."
+            action={
+              <button type="button" className={actionSecondary} onClick={clearFilters}>
+                <X size={16} strokeWidth={2} /> Clear filters
+              </button>
+            }
+          />
         </div>
       ) : (
-        <div className={`${panel} !p-0`}>
-          <div className="hidden items-center gap-4 border-b border-neutral-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-400 sm:flex">
+        <div className={`${panel} overflow-hidden p-0!`}>
+          <div className="hidden items-center gap-4 border-b border-neutral-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-neutral-400 lg:flex">
             <span className="flex-1">Service</span>
             <span className="w-20 text-right">Price</span>
             <span className="w-24 text-right">Duration</span>
-            <span className="w-20 text-center">Staff</span>
+            <span className="hidden w-20 text-center xl:block">Staff</span>
             <span className="w-28 text-center">Status</span>
             <span className="w-16 text-right">Actions</span>
           </div>
-          <ul className="divide-y divide-neutral-100 sm:px-4">
+          <ul className="divide-y divide-neutral-100 lg:px-4">
             {filtered.map((s) => {
               const staffNames = data?.staffByService.get(s.id) ?? []
               const onEdit = () => setEditing(s)
@@ -581,34 +585,19 @@ export default function ServicesPage() {
         </p>
       )}
 
-      {/* Mobile floating action button */}
-      <button
-        type="button"
-        onClick={() => setEditing('new')}
-        aria-label="Add service"
-        className="fixed right-5 bottom-[calc(1.25rem+env(safe-area-inset-bottom))] z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg shadow-brand-600/30 outline-none transition-colors hover:bg-brand-700 focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 sm:hidden"
-      >
-        <Plus size={24} strokeWidth={2} />
-      </button>
+      <Fab label="Add service" onClick={() => setEditing('new')} />
+      <div aria-hidden className="h-16 sm:hidden" />
 
-      {/* The editor is a focus-trapped bottom sheet on phones, so it never pushes the list around */}
       {editing && (
-        <Modal
-          onClose={() => setEditing(null)}
-          titleId="service-form-title"
-          title={editing === 'new' ? 'New service' : 'Edit service'}
-          maxWidth="max-w-lg"
-        >
-          <ServiceForm
-            key={editing === 'new' ? 'new' : editing.id}
-            businessId={business.id}
-            service={editing === 'new' ? null : editing}
-            onDone={(saved) => {
-              setEditing(null)
-              if (saved) reload()
-            }}
-          />
-        </Modal>
+        <ServiceSheet
+          key={editing === 'new' ? 'new' : editing.id}
+          businessId={business.id}
+          service={editing === 'new' ? null : editing}
+          onDone={(saved) => {
+            setEditing(null)
+            if (saved) reload()
+          }}
+        />
       )}
     </div>
   )

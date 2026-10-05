@@ -1,27 +1,17 @@
 import { useCallback, useMemo, useState } from 'react'
-import {
-  CalendarDays,
-  ChevronRight,
-  Eye,
-  Mail,
-  Phone,
-  Plus,
-  Repeat2,
-  Search,
-  UserPlus,
-  Users,
-  X,
-  type LucideIcon,
-} from 'lucide-react'
+import { CalendarDays, ChevronRight, Eye, Mail, Phone, Plus, Repeat2, Search, UserPlus, Users, X, type LucideIcon } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
 import { fetchBookings } from '../../lib/booking'
 import { useLoad } from '../../lib/useLoad'
 import { fmtDateTime, initials } from '../../lib/format'
-import { btnPrimary, input, panel } from '../../lib/ui'
+import { actionPrimary, actionSecondary, panel } from '../../lib/ui'
 import type { BookingRow, Customer } from '../../lib/types'
-import { ErrorText, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
+import { EmptyState, ErrorState, ListSkeleton, PageHeaderSkeleton, StatGridSkeleton } from '../../components/Status'
 import Modal from '../../components/Modal'
+import PageHeader from '../../components/PageHeader'
+import SearchField from '../../components/SearchField'
+import SegmentedTabs from '../../components/SegmentedTabs'
 import { StatusBadge } from './BookingParts'
 import { useBusiness } from './useBusiness'
 
@@ -78,7 +68,7 @@ function Stat({
   iconColor: string
 }) {
   return (
-    <div className={`${panel} !p-4`}>
+    <div className={`${panel} p-4!`}>
       <div className="flex items-start justify-between gap-2">
         <p className="text-2xl font-bold leading-none text-neutral-900">{value}</p>
         <span className={`flex h-9 w-9 flex-none items-center justify-center rounded-full ${tint}`}>
@@ -90,12 +80,17 @@ function Stat({
   )
 }
 
-const FILTER_TABS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All Customers' },
-  { value: 'upcoming', label: 'Upcoming' },
-  { value: 'new', label: 'New' },
-  { value: 'returning', label: 'Returning' },
-]
+function KindTag({ returning }: { returning: boolean }) {
+  return (
+    <span
+      className={`flex-none rounded-full px-2 py-0.5 text-xs font-medium ${
+        returning ? 'bg-brand-50 text-brand-700' : 'bg-neutral-100 text-neutral-600'
+      }`}
+    >
+      {returning ? 'Returning' : 'New'}
+    </span>
+  )
+}
 
 function CustomerDetails({
   customer,
@@ -111,70 +106,68 @@ function CustomerDetails({
   onClose: () => void
 }) {
   const s = stats ?? { total: 0, completed: 0, cancelled: 0, upcoming: 0, last: null, next: null, history: [] }
+  const hasContact = Boolean(customer.phone || customer.email)
 
   return (
-    <Modal onClose={onClose} title="Customer details" titleId="customer-details-title">
+    <Modal
+      onClose={onClose}
+      title="Customer"
+      titleId="customer-details-title"
+      footer={
+        hasContact ? (
+          <div className="flex gap-2">
+            {customer.phone && (
+              <a href={`tel:${customer.phone}`} className={`${actionPrimary} flex-1`}>
+                <Phone size={16} strokeWidth={2} aria-hidden /> Call
+              </a>
+            )}
+            {customer.email && (
+              <a href={`mailto:${customer.email}`} className={`${customer.phone ? actionSecondary : actionPrimary} flex-1`}>
+                <Mail size={16} strokeWidth={2} aria-hidden /> Email
+              </a>
+            )}
+          </div>
+        ) : undefined
+      }
+    >
       <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-semibold text-white">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-semibold text-brand-700">
           {initials(customer.name)}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-[15px] font-semibold text-neutral-900">{customer.name}</p>
-          <p className="truncate text-xs text-neutral-500">
-            {[customer.phone, customer.email].filter(Boolean).join(' · ') || '—'}
+          <p className="text-[17px] font-semibold text-neutral-900 wrap-anywhere">{customer.name}</p>
+          <p className="text-[13px] text-neutral-500 wrap-anywhere">
+            {[customer.phone, customer.email].filter(Boolean).join(' · ') || 'No contact details'}
           </p>
         </div>
       </div>
 
-      {(customer.phone || customer.email) && (
-        <div className="mt-4 flex gap-2">
-          {customer.phone && (
-            <a
-              href={`tel:${customer.phone}`}
-              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border border-neutral-300 text-sm font-medium text-neutral-700 outline-none transition-colors active:bg-neutral-50 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
-            >
-              <Phone size={16} strokeWidth={1.75} />
-              Call
-            </a>
-          )}
-          {customer.email && (
-            <a
-              href={`mailto:${customer.email}`}
-              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-lg border border-neutral-300 text-sm font-medium text-neutral-700 outline-none transition-colors active:bg-neutral-50 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
-            >
-              <Mail size={16} strokeWidth={1.75} />
-              Email
-            </a>
-          )}
-        </div>
-      )}
+      {customer.notes && <div className="mt-4 rounded-xl bg-neutral-50 p-3 text-sm text-neutral-700">{customer.notes}</div>}
 
-      {customer.notes && (
-        <div className="mt-3 rounded-lg bg-neutral-50 p-2.5 text-sm text-neutral-700">{customer.notes}</div>
-      )}
-
-      <div className="mt-4 grid grid-cols-4 divide-x divide-neutral-100 rounded-lg border border-neutral-100">
-        {[
-          ['Total', s.total],
-          ['Completed', s.completed],
-          ['Cancelled', s.cancelled],
-          ['Upcoming', s.upcoming],
-        ].map(([label, value]) => (
-          <div key={label} className="px-2 py-2.5 text-center">
-            <p className="text-base font-semibold text-neutral-900">{value}</p>
-            <p className="text-[11px] text-neutral-500">{label}</p>
+      <dl className="mt-4 grid grid-cols-4 divide-x divide-neutral-100 rounded-xl border border-neutral-100">
+        {(
+          [
+            ['Total', s.total],
+            ['Done', s.completed],
+            ['Cancelled', s.cancelled],
+            ['Upcoming', s.upcoming],
+          ] as const
+        ).map(([label, value]) => (
+          <div key={label} className="px-1 py-2.5 text-center">
+            <dd className="text-base font-semibold tabular-nums text-neutral-900">{value}</dd>
+            <dt className="truncate text-[11px] text-neutral-500">{label}</dt>
           </div>
         ))}
-      </div>
+      </dl>
 
-      <div className="mt-4">
-        <p className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-neutral-500">Recent bookings</p>
+      <div className="mt-5">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">Recent bookings</p>
         {s.history.length === 0 ? (
-          <p className="text-sm text-neutral-500">No bookings yet.</p>
+          <p className="py-2 text-sm text-neutral-500">No bookings yet.</p>
         ) : (
           <ul className="divide-y divide-neutral-100">
             {s.history.map((b) => (
-              <li key={b.id} className="flex items-center justify-between gap-3 py-2">
+              <li key={b.id} className="flex items-center justify-between gap-3 py-2.5">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-neutral-900">{fmtDateTime(b.start_at, timezone)}</p>
                   <p className="truncate text-xs text-neutral-500">
@@ -189,12 +182,9 @@ function CustomerDetails({
         )}
       </div>
 
-      <div className="mt-5 border-t border-neutral-100 pt-4">
-        <a href={bookingUrl} target="_blank" rel="noreferrer" className={`${btnPrimary} h-11 w-full sm:h-auto`}>
-          <Plus size={16} strokeWidth={1.75} />
-          Add booking
-        </a>
-      </div>
+      <a href={bookingUrl} target="_blank" rel="noreferrer" className={`${actionSecondary} mt-4 w-full`}>
+        <Plus size={16} strokeWidth={2} aria-hidden /> New booking for this customer
+      </a>
     </Modal>
   )
 }
@@ -218,7 +208,7 @@ export default function CustomersPage() {
     ])
     return { customers, bookings }
   }, [business.id])
-  const { data, loading, error } = useLoad(load)
+  const { data, loading, error, reload } = useLoad(load)
 
   const bookingUrl = `${window.location.origin}/book/${business.slug}`
   // Deliberate: `data` re-reads the clock when the page reloads, so "upcoming" is not frozen at mount.
@@ -232,13 +222,15 @@ export default function CustomersPage() {
     const upcomingBookings = (data?.bookings ?? []).filter(
       (b) => new Date(b.start_at) > now && (b.status === 'pending' || b.status === 'confirmed'),
     ).length
+    const withUpcoming = customers.filter((c) => (statsById.get(c.id)?.upcoming ?? 0) > 0).length
     return {
       total: customers.length,
       newCount,
       returningCount: customers.length - newCount,
       upcomingBookings,
+      withUpcoming,
     }
-  }, [data, now])
+  }, [data, now, statsById])
 
   const rows = useMemo(() => {
     let list = data?.customers ?? []
@@ -260,24 +252,28 @@ export default function CustomersPage() {
     return (
       <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
         <PageHeaderSkeleton />
-        <StatGridSkeleton />
+        <div className="hidden sm:block">
+          <StatGridSkeleton />
+        </div>
         <ListSkeleton />
       </div>
     )
+  if (error && !data) return <ErrorState message={error} onRetry={reload} />
+
+  const tabs = [
+    { value: 'all' as const, label: 'All', count: summary.total },
+    { value: 'upcoming' as const, label: 'Upcoming', count: summary.withUpcoming },
+    { value: 'new' as const, label: 'New', count: summary.newCount },
+    { value: 'returning' as const, label: 'Returning', count: summary.returningCount },
+  ]
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 pb-[env(safe-area-inset-bottom)] sm:space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Customers</h1>
-          <p className="mt-1 text-sm text-neutral-500">Manage your customers and view their booking history.</p>
-        </div>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-4 sm:space-y-6">
+      <PageHeader title="Customers" subtitle="Manage your customers and view their booking history." />
 
-      {/* Summary */}
+      {/* Summary — phones read these counts off the filter tabs */}
       {data && (
-        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-4">
+        <div className="hidden gap-3 sm:grid sm:grid-cols-4">
           <Stat label="Total customers" value={summary.total} icon={Users} tint="bg-indigo-50" iconColor="text-indigo-600" />
           <Stat label="New" value={summary.newCount} icon={UserPlus} tint="bg-violet-50" iconColor="text-violet-600" />
           <Stat label="Returning" value={summary.returningCount} icon={Repeat2} tint="bg-blue-50" iconColor="text-blue-600" />
@@ -285,133 +281,109 @@ export default function CustomersPage() {
         </div>
       )}
 
-      {/* Filter bar: pinned under the mobile app bar, inline from md up */}
-      <div className="sticky top-14 z-10 -mx-4 border-b border-neutral-200 bg-neutral-50/95 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 md:static md:z-auto md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
-        <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
-          <div className="no-scrollbar order-2 flex items-center gap-1 overflow-x-auto rounded-full bg-neutral-100 p-1 sm:order-none">
-            {FILTER_TABS.map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setFilter(tab.value)}
-                className={`flex-none whitespace-nowrap rounded-full px-3.5 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-brand-600 sm:py-1.5 ${
-                  filter === tab.value ? 'bg-white text-brand-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative order-1 min-w-0 flex-1 sm:order-none sm:w-64 sm:flex-none">
-            <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              type="search"
-              enterKeyHint="search"
-              placeholder="Search customers…"
-              className={`${input} !h-11 !rounded-full !border-neutral-300 !pl-9 [&::-webkit-search-cancel-button]:hidden sm:!h-9`}
-              aria-label="Search customers"
-            />
-            {q && (
-              <button
-                onClick={() => setQ('')}
-                aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-neutral-400 outline-none transition-colors active:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 sm:hidden"
-              >
-                <X size={16} strokeWidth={2} />
-              </button>
-            )}
-          </div>
-        </div>
+      {/* Filter bar: pinned under the app bar on phones so search is always in reach, inline from md */}
+      <div className="sticky top-14 z-10 -mx-4 space-y-2.5 border-b border-neutral-200/70 bg-neutral-50/95 px-4 pb-3 pt-1 backdrop-blur-sm sm:-mx-6 sm:px-6 md:static md:z-auto md:mx-0 md:flex md:flex-row-reverse md:items-center md:justify-between md:gap-3 md:space-y-0 md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+        <SearchField value={q} onChange={setQ} placeholder="Search name, phone or email" label="Search customers" className="md:w-72" />
+        <SegmentedTabs options={tabs} value={filter} onChange={setFilter} label="Filter customers" />
       </div>
 
-      {/* Result count */}
-      {data && data.customers.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {hasFilters && data && data.customers.length > 0 && (
+        <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
           <p className="text-xs font-medium text-neutral-500" aria-live="polite">
-            {hasFilters ? `${rows.length} of ${data.customers.length}` : data.customers.length} customers
+            {rows.length} of {data.customers.length} customers
           </p>
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="rounded-md text-xs font-medium text-brand-600 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand-600"
-            >
-              Clear all
-            </button>
-          )}
+          <button
+            onClick={clearFilters}
+            className="min-h-8 rounded-md text-xs font-medium text-brand-600 underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-brand-600"
+          >
+            Clear all
+          </button>
         </div>
       )}
 
-      <ErrorText message={error} />
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {(data?.customers.length ?? 0) === 0 ? (
-        <div className={`${panel} flex flex-col items-center px-4 py-10 text-center sm:py-14`}>
-          <Users size={28} strokeWidth={1.5} className="text-neutral-300" />
-          <p className="mt-3 text-sm font-medium text-neutral-900">No customers yet</p>
-          <p className="mt-1 text-sm text-neutral-500">Customers will appear here when they book an appointment.</p>
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Users}
+            title="No customers yet"
+            body="Everyone who books through your booking page is added here automatically."
+            action={
+              <a href={bookingUrl} target="_blank" rel="noreferrer" className={actionSecondary}>
+                Open booking page
+              </a>
+            }
+          />
         </div>
       ) : rows.length === 0 ? (
-        <div className={`${panel} flex flex-col items-center px-4 py-10 text-center sm:py-14`}>
-          <Search size={28} strokeWidth={1.5} className="text-neutral-300" />
-          <p className="mt-3 text-sm font-medium text-neutral-900">No customers found</p>
-          <p className="mt-1 text-sm text-neutral-500">Try a different name, phone number, or email.</p>
-          {hasFilters && (
-            <button onClick={clearFilters} className={`mt-4 h-11 ${btnPrimary} sm:h-auto`}>
-              <X size={16} strokeWidth={1.75} />
-              Clear all filters
-            </button>
-          )}
+        <div className={`${panel} p-0!`}>
+          <EmptyState
+            icon={Search}
+            title="No customers found"
+            body="Try a different name, phone number, or email."
+            action={
+              <button onClick={clearFilters} className={actionSecondary}>
+                <X size={16} strokeWidth={2} /> Clear filters
+              </button>
+            }
+          />
         </div>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className={`${panel} hidden overflow-x-auto !p-0 md:block`}>
-            <table className="w-full text-left text-sm">
+          {/* Desktop table (lg+). Contact sits under the name rather than in its own column, and the
+              fixed layout truncates long names/emails instead of pushing the table off the panel. */}
+          <div className={`${panel} hidden overflow-hidden p-0! lg:block`}>
+            <table className="w-full table-fixed text-left text-sm">
               <thead className="border-b border-neutral-200 text-[12px] uppercase tracking-wide text-neutral-500">
                 <tr>
                   <th className="p-3.5 font-medium">Customer</th>
-                  <th className="p-3.5 font-medium">Contact</th>
-                  <th className="p-3.5 font-medium">Total bookings</th>
-                  <th className="p-3.5 font-medium">Last booking</th>
-                  <th className="p-3.5 font-medium">Next booking</th>
-                  <th className="p-3.5 font-medium">Status</th>
-                  <th className="p-3.5 font-medium"></th>
+                  <th className="w-24 p-3.5 font-medium">Bookings</th>
+                  <th className="hidden w-40 p-3.5 font-medium xl:table-cell">Last booking</th>
+                  <th className="w-40 p-3.5 font-medium">Next booking</th>
+                  <th className="w-28 p-3.5 font-medium">Status</th>
+                  <th className="w-16 p-3.5 font-medium">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((c) => {
                   const s = statsById.get(c.id)
                   const total = c.bookings[0]?.count ?? 0
+                  const contact = [c.phone, c.email].filter(Boolean).join(' · ')
                   return (
                     <tr key={c.id} className="border-b border-neutral-100 last:border-0 hover:bg-neutral-50">
                       <td className="p-3.5 align-middle">
-                        <span className="text-[14px] font-medium text-neutral-900">{c.name}</span>
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <span className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-neutral-100 text-[11px] font-semibold text-neutral-600">
+                            {initials(c.name)}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-[14px] font-medium text-neutral-900" title={c.name}>
+                              {c.name}
+                            </span>
+                            <span className="block truncate text-[12px] leading-tight text-neutral-500" title={contact || undefined}>
+                              {contact || '—'}
+                            </span>
+                          </span>
+                        </span>
                       </td>
-                      <td className="p-3.5 align-middle text-neutral-600">
-                        {[c.phone, c.email].filter(Boolean).join(' · ') || '—'}
-                      </td>
-                      <td className="p-3.5 align-middle text-neutral-700">{total}</td>
-                      <td className="whitespace-nowrap p-3.5 align-middle text-neutral-600">
+                      <td className="p-3.5 align-middle tabular-nums text-neutral-700">{total}</td>
+                      <td className="hidden whitespace-nowrap p-3.5 align-middle text-neutral-600 xl:table-cell">
                         {s?.last ? fmtDateTime(s.last.start_at, timezone) : '—'}
                       </td>
                       <td className="whitespace-nowrap p-3.5 align-middle text-neutral-600">
                         {s?.next ? fmtDateTime(s.next.start_at, timezone) : '—'}
                       </td>
                       <td className="p-3.5 align-middle">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-                            total <= 1 ? 'bg-neutral-100 text-neutral-600' : 'bg-blue-100 text-blue-800'
-                          }`}
-                        >
-                          {total <= 1 ? 'New' : 'Returning'}
-                        </span>
+                        <KindTag returning={total > 1} />
                       </td>
-                      <td className="p-3.5 align-middle">
+                      <td className="p-3.5 text-right align-middle">
                         <button
                           onClick={() => setActive(c)}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 outline-none hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-900"
-                          aria-label="View customer"
+                          className="ml-auto flex h-9 w-9 items-center justify-center rounded-lg text-neutral-400 outline-none hover:bg-neutral-100 hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-neutral-900"
+                          aria-label={`View ${c.name}`}
                           title="View customer"
                         >
                           <Eye size={16} strokeWidth={1.75} />
@@ -424,8 +396,8 @@ export default function CustomersPage() {
             </table>
           </div>
 
-          {/* Mobile card list */}
-          <ul className="space-y-2.5 md:hidden">
+          {/* Phones + tablets: one divided list; contact details wait in the sheet */}
+          <ul className={`${panel} divide-y divide-neutral-100 overflow-hidden p-0! lg:hidden`}>
             {rows.map((c) => {
               const s = statsById.get(c.id)
               const total = c.bookings[0]?.count ?? 0
@@ -433,37 +405,31 @@ export default function CustomersPage() {
                 <li key={c.id}>
                   <button
                     onClick={() => setActive(c)}
-                    className={`${panel} flex w-full items-center gap-3 !p-3.5 text-left outline-none transition-[transform,background-color] duration-100 active:scale-[0.99] active:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-neutral-900`}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left outline-none transition-colors active:bg-neutral-100 focus-visible:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-600"
                   >
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-sm font-semibold text-white">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-[13px] font-semibold text-neutral-600">
                       {initials(c.name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="min-w-0 truncate text-[15px] font-medium text-neutral-900">{c.name}</p>
-                        <span
-                          className={`flex-none rounded-full px-2 py-0.5 text-xs font-medium ${
-                            total <= 1 ? 'bg-neutral-100 text-neutral-600' : 'bg-blue-100 text-blue-800'
-                          }`}
-                        >
-                          {total <= 1 ? 'New' : 'Returning'}
-                        </span>
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-neutral-500">
-                        {[c.phone, c.email].filter(Boolean).join(' · ') || '—'}
-                      </p>
-                      <div className="mt-1.5 flex items-center gap-2 text-xs">
-                        <span className="flex-none text-neutral-500">{total} bookings</span>
-                        <span className="text-neutral-300">·</span>
-                        <span
-                          className={`flex min-w-0 items-center gap-1 ${s?.next ? 'font-medium text-brand-600' : 'text-neutral-400'}`}
-                        >
-                          <CalendarDays size={12} strokeWidth={2} className="flex-none" />
-                          <span className="truncate">{s?.next ? fmtDateTime(s.next.start_at, timezone) : 'No upcoming'}</span>
-                        </span>
-                      </div>
-                    </div>
-                    <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-neutral-300" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="min-w-0 truncate text-[15px] font-medium text-neutral-900">{c.name}</span>
+                        <KindTag returning={total > 1} />
+                      </span>
+                      <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px]">
+                        {s?.next ? (
+                          <span className="flex min-w-0 items-center gap-1 font-medium text-brand-600">
+                            <CalendarDays size={13} strokeWidth={2} className="flex-none" aria-hidden />
+                            <span className="truncate">Next {fmtDateTime(s.next.start_at, timezone)}</span>
+                          </span>
+                        ) : (
+                          <span className="truncate text-neutral-500">
+                            {total} booking{total === 1 ? '' : 's'}
+                            {s?.last ? ` · last ${fmtDateTime(s.last.start_at, timezone)}` : ''}
+                          </span>
+                        )}
+                      </span>
+                    </span>
+                    <ChevronRight size={18} strokeWidth={1.75} className="shrink-0 text-neutral-300" aria-hidden />
                   </button>
                 </li>
               )

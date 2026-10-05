@@ -17,7 +17,8 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react'
-import { fetchPlans, fmtMoney } from '../../lib/billing'
+import { billingState, creditDays, fetchPlans, fmtDate, fmtMoney, type BillingState } from '../../lib/billing'
+import { CAPABILITY_INFO } from '../../lib/plans'
 import {
   MAX_PROOF_BYTES,
   PROOF_ACCEPT,
@@ -32,7 +33,7 @@ import {
 import { todayIn } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
 import { btnPrimary, input, panel } from '../../lib/ui'
-import type { SubscriptionPayment } from '../../lib/types'
+import type { Plan, SubscriptionPayment } from '../../lib/types'
 import CopyButton from '../../components/CopyButton'
 import PaymentStatusPill from '../../components/PaymentStatusPill'
 import { Bone, PageHeaderSkeleton } from '../../components/Status'
@@ -84,10 +85,12 @@ function FlowSteps({ current }: { current: number }) {
 /** A labelled value with a copy affordance, used for the details a customer retypes into their bank app. */
 function DetailRow({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-neutral-100 py-2.5 last:border-0">
+    // Phones stack label over value: side by side, an account number got truncated next to its
+    // copy button, which is the one thing a customer retyping it into a bank app must be able to read.
+    <div className="flex flex-col gap-1 border-b border-neutral-100 py-2.5 last:border-0 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
       <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-neutral-500">{label}</span>
-      <span className="flex min-w-0 items-center gap-2">
-        <span className={`truncate text-sm font-semibold text-neutral-900 ${mono ? 'font-mono' : ''}`}>{value}</span>
+      <span className="flex min-w-0 items-center justify-between gap-2 sm:justify-end">
+        <span className={`min-w-0 text-sm font-semibold text-neutral-900 wrap-anywhere sm:truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
         <CopyButton value={value} label={label} />
       </span>
     </div>
@@ -190,23 +193,73 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   )
 }
 
+/** "What happens when this is verified", so nobody pays without knowing how their plan changes. */
+function reviewFor(plan: Plan, state: BillingState): { headline: string; detail: string; unlocks: string[] } {
+  const period = plan.interval === 'year' ? 'year' : 'month'
+  if (state.kind === 'active' && state.plan?.id === plan.id && state.endsAt) {
+    const next = new Date(state.endsAt)
+    if (plan.interval === 'year') next.setFullYear(next.getFullYear() + 1)
+    else next.setMonth(next.getMonth() + 1)
+    return {
+      headline: `Renew ${plan.name}`,
+      detail: `Adds one ${period} after your current end date — your plan will run until ${fmtDate(next.toISOString())}.`,
+      unlocks: [],
+    }
+  }
+  if (state.kind === 'active' && state.plan) {
+    const from = state.plan
+    const days = creditDays(state.endsAt, from, plan)
+    const gained = (plan.capabilities ?? []).filter((c) => !(from.capabilities ?? []).includes(c))
+    return {
+      headline: `Upgrade from ${from.name} to ${plan.name}`,
+      detail:
+        `${plan.name} starts as soon as your payment is verified and runs for one ${period}` +
+        (days > 0 ? `, plus about ${days} extra day${days === 1 ? '' : 's'} for your unused ${from.name} time.` : '.'),
+      unlocks: [
+        ...(from.max_staff !== null && plan.max_staff === null ? ['Unlimited staff'] : []),
+        ...gained.map((c) => CAPABILITY_INFO[c].title),
+      ],
+    }
+  }
+  return {
+    headline: `${plan.name} plan`,
+    detail:
+      state.kind === 'trial'
+        ? `Your trial keeps running until your payment is verified; then ${plan.name} starts and runs for one ${period}. Remaining trial days don't carry over.`
+        : `${plan.name} starts as soon as your payment is verified and runs for one ${period}.`,
+    unlocks: [],
+  }
+}
+
 const fmtBytes = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(bytes < 1024 * 1024 ? 2 : 1)} MB`
 
 type FormErrors = { txnRef?: string; date?: string; file?: string; terms?: string; form?: string }
 
 export default function PayPlanPage() {
   const { planId = '' } = useParams()
-  const { business, timezone } = useBusiness()
+  const { business, timezone, billing } = useBusiness()
   const navigate = useNavigate()
+
+  // Read at load time rather than as a dependency: a realtime refresh of the subscription must
+  // not re-run the loader (and flash the skeleton) while the owner is filling in the form.
+  const subscriptionRef = useRef(billing.subscription)
+  useEffect(() => {
+    subscriptionRef.current = billing.subscription
+  }, [billing.subscription])
 
   const load = useCallback(async () => {
     const [plans, settings, history] = await Promise.all([fetchPlans(), fetchPaymentSettings(), fetchPayments(business.id)])
     const plan = plans.find((p) => p.id === planId)
     if (!plan) throw new Error('That plan is no longer available.')
+    const state = billingState(subscriptionRef.current, plans)
+    const current = state.kind === 'active' ? state.plan : undefined
+    // Switching to a cheaper plan needs no payment; send the owner to the switch instead of
+    // reserving a payment they should not make.
+    if (current && plan.price_cents < current.price_cents) return { kind: 'downgrade' as const, plan, current }
     if (!settings?.is_active) throw new Error('Online payment is unavailable right now. Please try again later.')
     // Reserving here means the reference on screen is the one the admin will see.
     const payment = await startPayment(business.id, plan.id)
-    return { plan, settings, history, payment }
+    return { kind: 'pay' as const, plan, settings, history, payment, state }
   }, [business.id, planId])
   const { data, loading, error } = useLoad(load)
 
@@ -252,7 +305,7 @@ export default function PayPlanPage() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
-    if (!data || busy) return
+    if (!data || data.kind !== 'pay' || busy) return
 
     // Catch what we can before the upload, and point at the field that needs fixing.
     const next: FormErrors = {}
@@ -292,7 +345,7 @@ export default function PayPlanPage() {
   const backLink = (
     <Link
       to="/dashboard/billing"
-      className="-ml-1 inline-flex h-9 items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-neutral-500 outline-none transition-colors hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600"
+      className="-ml-1 inline-flex h-11 items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-neutral-500 outline-none transition-colors hover:text-neutral-900 focus-visible:ring-2 focus-visible:ring-brand-600 sm:h-9"
     >
       <ArrowLeft size={15} strokeWidth={1.75} /> Back to billing
     </Link>
@@ -331,8 +384,33 @@ export default function PayPlanPage() {
       </div>
     )
 
-  const { plan, settings, history, payment } = data
+  if (data.kind === 'downgrade')
+    return (
+      <div className="mx-auto max-w-2xl space-y-4">
+        {backLink}
+        <section className={`${panel} text-center`}>
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
+            <Info size={22} strokeWidth={1.75} />
+          </span>
+          <h1 className="mt-3 text-xl font-semibold tracking-tight text-neutral-900">No payment needed</h1>
+          <p className="mx-auto mt-1.5 max-w-sm text-sm text-neutral-600">
+            You're on {data.current.name}. Switching to {data.plan.name} happens right away, and your remaining{' '}
+            {data.current.name} time carries over — review what changes before you switch.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(`/dashboard/billing?change=${data.plan.id}`)}
+            className={`${btnPrimary} mt-5 h-12 w-full sm:h-11 sm:w-auto sm:px-5`}
+          >
+            Review switch to {data.plan.name}
+          </button>
+        </section>
+      </div>
+    )
+
+  const { plan, settings, history, payment, state } = data
   const amount = fmtMoney(payment.amount_cents, payment.currency)
+  const review = reviewFor(plan, state)
   const period = payment.billing_interval === 'year' ? 'Yearly' : 'Monthly'
   const duplicate = findPossibleDuplicate(history, txnRef)
   const awaiting = history.find((p) => p.status === 'pending') ?? null
@@ -420,7 +498,7 @@ export default function PayPlanPage() {
     <div className="mx-auto max-w-5xl space-y-4 pb-[env(safe-area-inset-bottom)] sm:space-y-5">
       <header className="min-w-0">
         {backLink}
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Complete your payment</h1>
+        <h1 className="mt-1 text-[22px] font-semibold tracking-tight text-neutral-900 sm:text-[28px]">Complete your payment</h1>
         <p className="mt-1 max-w-2xl text-sm text-neutral-500">
           Pay with {settings.bank_name} or QR Ph from your banking app, then upload the receipt. Your subscription is
           activated after our team verifies the transfer.
@@ -462,6 +540,25 @@ export default function PayPlanPage() {
             <p className="text-xs leading-relaxed text-neutral-500">
               Send this exact amount. The plan does not renew automatically — you choose when to pay again.
             </p>
+
+            {/* Review: what this payment changes, before the money moves */}
+            <div className="rounded-xl border border-brand-200 bg-brand-50/50 px-3.5 py-3">
+              <p className="text-sm font-semibold text-neutral-900">{review.headline}</p>
+              <p className="mt-1 text-xs leading-relaxed text-neutral-600">{review.detail}</p>
+              {review.unlocks.length > 0 && (
+                <>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">You'll unlock</p>
+                  <ul className="mt-1.5 space-y-1 text-sm text-neutral-700">
+                    {review.unlocks.map((u) => (
+                      <li key={u} className="flex items-start gap-2">
+                        <Check size={14} strokeWidth={2.5} className="mt-0.5 flex-none text-brand-600" aria-hidden />
+                        {u}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
           </section>
 
           <section className={`${panel} space-y-3`} aria-labelledby="method-heading">

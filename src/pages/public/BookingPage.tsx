@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  AlertCircle, ArrowLeft, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
-  Mail, MapPin, Phone, Search, Users,
+  AlertCircle, ArrowUpRight, Calendar, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock,
+  EyeOff, Globe, Info, Mail, MapPin, Phone, Search, Sparkles, UserRound, Users,
 } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { unwrap } from '../../lib/db'
@@ -10,18 +10,17 @@ import { createBooking, getAvailableSlots, type Slot } from '../../lib/booking'
 import { addDays, fmtClock, fmtDuration, fmtPeso, fmtTime, todayIn } from '../../lib/format'
 import { useLoad } from '../../lib/useLoad'
 import { usePageMeta } from '../../lib/usePageMeta'
-import type { Business, Service, Staff, WorkingHours } from '../../lib/types'
+import type { Service, Staff, WorkingHours } from '../../lib/types'
+import { POLICY_FIELDS, directionsUrl, displayUrl, fullAddress, type PublicBusiness } from '../../lib/publicBusiness'
+import { FacebookIcon, InstagramIcon, TikTokIcon } from '../../components/SocialIcons'
 
-// Anonymous users may only read these staff columns (see 0005_security_hardening.sql)
+// The staff columns get_public_staff() exposes (see 0026_security_audit.sql)
 type PublicStaff = Pick<Staff, 'id' | 'business_id' | 'name' | 'avatar_url' | 'position' | 'is_active'>
 import Reveal from '../../components/Reveal'
-import { ErrorText, Loading } from '../../components/Status'
+import { ErrorState, ErrorText, NotFoundPage } from '../../components/Status'
 
 interface Catalog {
-  business: Business
-  timezone: string
-  maxAdvanceDays: number
-  workingHours: WorkingHours
+  business: PublicBusiness
   services: Service[]
   staff: PublicStaff[]
   links: { staff_id: string; service_id: string }[]
@@ -72,50 +71,11 @@ const STEP_TITLES: Record<StepKey, string> = {
   datetime: 'Pick a date and time',
   details: 'Your details',
 }
-const STEP_LABELS: Record<StepKey, string> = {
-  service: 'Service',
-  staff: 'Staff',
-  datetime: 'Date & Time',
-  details: 'Your details',
-}
 const STEP_HINTS: Record<StepKey, string> = {
   service: 'Pick what you would like to book.',
   staff: 'Book with someone specific, or take the first available.',
   datetime: 'Choose a day, then an open time.',
-  details: 'Check your appointment and tell us how to reach you.',
-}
-
-/** Quiet "where am I" indicator: a labelled track on every size, never the loudest thing on screen. */
-function StepProgress({ current, labels, accentStyle }: { current: number; labels: string[]; accentStyle: React.CSSProperties }) {
-  const total = labels.length
-  return (
-    <div className="mb-6">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-[13px] font-medium text-slate-500">
-          Step {current} of {total}
-          <span className="text-slate-300"> · </span>
-          <span className="text-slate-900">{labels[current - 1]}</span>
-        </p>
-        <ol className="hidden items-center gap-1.5 text-[11px] font-medium sm:flex">
-          {labels.map((label, i) => (
-            <li key={label} className={i + 1 === current ? 'text-slate-900' : 'text-slate-400'}>
-              {label}
-              {i < total - 1 && <span className="px-1.5 text-slate-300">›</span>}
-            </li>
-          ))}
-        </ol>
-      </div>
-      <div className="mt-2 flex gap-1" aria-hidden="true">
-        {labels.map((label, i) => (
-          <span
-            key={label}
-            style={i < current ? accentStyle : undefined}
-            className={`h-1 flex-1 rounded-full transition-colors duration-300 ${i < current ? '' : 'bg-slate-200'}`}
-          />
-        ))}
-      </div>
-    </div>
-  )
+  details: 'Tell us how to reach you and you’re done.',
 }
 
 function Initials({ name, className }: { name: string; className: string }) {
@@ -155,22 +115,24 @@ function DatePicker({
     'grid h-10 w-10 place-items-center rounded-full border border-slate-200 text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10 disabled:cursor-not-allowed disabled:border-slate-100 disabled:text-slate-300'
 
   return (
-    <div className="rounded-2xl border border-slate-200 p-2 sm:p-4">
+    <div>
       <div className="flex items-center justify-between gap-2">
-        <button type="button" className={navBtn} onClick={() => setCursor(shiftMonth(cursor, -1))} disabled={!canGoBack} aria-label="Previous month">
-          <ChevronLeft size={18} />
-        </button>
-        <p aria-live="polite" className="text-sm font-semibold text-slate-900">{monthLabel(cursor)}</p>
-        <button type="button" className={navBtn} onClick={() => setCursor(shiftMonth(cursor, 1))} disabled={!canGoForward} aria-label="Next month">
-          <ChevronRight size={18} />
-        </button>
+        <p aria-live="polite" className="font-display text-lg font-medium text-slate-900">{monthLabel(cursor)}</p>
+        <div className="flex items-center gap-1">
+          <button type="button" className={navBtn} onClick={() => setCursor(shiftMonth(cursor, -1))} disabled={!canGoBack} aria-label="Previous month">
+            <ChevronLeft size={18} />
+          </button>
+          <button type="button" className={navBtn} onClick={() => setCursor(shiftMonth(cursor, 1))} disabled={!canGoForward} aria-label="Next month">
+            <ChevronRight size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400" aria-hidden="true">
         {WEEKDAY_INITIALS.map((d, i) => <span key={i} className="py-1">{d}</span>)}
       </div>
 
-      <div className="mt-1 grid grid-cols-7 gap-1">
+      <div className="mt-1 grid grid-cols-7 gap-0.5 xs:gap-1">
         {Array.from({ length: lead }).map((_, i) => <span key={`pad-${i}`} />)}
         {Array.from({ length: total }, (_, i) => {
           const date = `${month}-${String(i + 1).padStart(2, '0')}`
@@ -186,12 +148,12 @@ function DatePicker({
               aria-label={`${dayLabel(date)}${off ? ' — unavailable' : ''}`}
               onClick={() => onSelect(date)}
               style={selected ? { backgroundColor: accent, borderColor: accent } : undefined}
-              className={`relative grid aspect-square min-h-11 place-items-center rounded-xl border text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10 ${
+              className={`relative grid aspect-square w-full place-items-center rounded-full border text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10 ${
                 selected
-                  ? 'border font-semibold text-white'
+                  ? 'border font-semibold text-white shadow-md'
                   : off
                     ? 'cursor-not-allowed border-transparent text-slate-300 line-through decoration-slate-300'
-                    : 'border-slate-200 font-medium text-slate-700 hover:border-slate-400 hover:bg-slate-50'
+                    : 'border-transparent bg-slate-100 font-semibold text-slate-800 hover:border-slate-400 hover:bg-white'
               }`}
             >
               {i + 1}
@@ -202,30 +164,54 @@ function DatePicker({
           )
         })}
       </div>
-      <p className="mt-3 text-xs text-slate-500">Crossed-out days are unavailable.</p>
+      <p className="mt-3 text-xs text-slate-500">Shaded days are open. Crossed-out days are unavailable.</p>
     </div>
   )
 }
 
-/** One labelled line of the booking summary — label above value, value carrying the weight. */
-function SummaryRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/** One line of the appointment ticket: icon, label, and the value carrying the weight. */
+function SummaryRow({ icon: Icon, label, value, sub, empty }: {
+  icon: typeof Clock
+  label: string
+  value: string
+  sub?: string
+  empty?: boolean
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-4">
-      <dt className="shrink-0 text-[13px] text-slate-500">{label}</dt>
-      <dd className="text-right text-[13px] font-medium text-slate-900">
-        {value}
-        {sub && <span className="block text-[12px] font-normal text-slate-500">{sub}</span>}
-      </dd>
+    <div className="flex items-start gap-3">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-slate-500">
+        <Icon size={15} />
+      </span>
+      <div className="min-w-0">
+        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</dt>
+        <dd className={`truncate text-sm ${empty ? 'text-slate-400' : 'font-medium text-slate-900'}`}>
+          {value}
+          {sub && <span className="block truncate text-[12px] font-normal text-slate-500">{sub}</span>}
+        </dd>
+      </div>
     </div>
   )
 }
 
 function Booker({ catalog }: { catalog: Catalog }) {
-  const { business, timezone, maxAdvanceDays, workingHours, services, staff, links } = catalog
+  const { business, services, staff, links } = catalog
+  const { timezone, max_advance_days: maxAdvanceDays, working_hours: workingHours } = business
+  const address = fullAddress(business)
+  const directions = directionsUrl(business.maps_url, address)
+  const socials = (
+    [
+      [business.facebook_url, 'Facebook', FacebookIcon],
+      [business.instagram_url, 'Instagram', InstagramIcon],
+      [business.tiktok_url, 'TikTok', TikTokIcon],
+    ] as const
+  ).filter(([url]) => !!url) as [string, string, typeof FacebookIcon][]
+  const policies = POLICY_FIELDS.filter(([k]) => business[k]?.trim())
+  const hasContact = !!(address || business.phone || business.email || business.website_url || socials.length)
   const accent = business.accent_color || '#0f172a'
   const accentSolid = { backgroundColor: accent }
   const accentText = { color: accent }
   const accentTint = { backgroundColor: `color-mix(in srgb, ${accent} 10%, white)` }
+  const accentTintSoft = { backgroundColor: `color-mix(in srgb, ${accent} 6%, white)` }
   const todayKey = new Intl.DateTimeFormat('en-US', { timeZone: timezone, weekday: 'short' }).format(new Date()).toLowerCase().slice(0, 3)
   const navigate = useNavigate()
 
@@ -236,6 +222,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
     title: `Book an appointment with ${business.name} | Appointly`,
     description:
       business.description?.trim() ||
+      business.tagline?.trim() ||
       `Book an appointment with ${business.name} online. Choose a service, pick a time that suits you, and confirm in a few taps.`,
     image: business.logo_url ?? undefined,
   })
@@ -262,6 +249,45 @@ function Booker({ catalog }: { catalog: Catalog }) {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
+  // Phones: a booking bar pinned to the bottom while neither the hero's button nor the flow is on
+  // screen — the flow sits below the whole storefront, and nobody should have to hunt for it.
+  const heroRef = useRef<HTMLElement>(null)
+  const flowRef = useRef<HTMLElement>(null)
+  const [inView, setInView] = useState({ hero: true, flow: false })
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver((entries) => {
+      setInView((v) => {
+        const next = { ...v }
+        for (const e of entries) {
+          if (e.target === heroRef.current) next.hero = e.isIntersecting
+          if (e.target === flowRef.current) next.flow = e.isIntersecting
+        }
+        return next
+      })
+    })
+    if (heroRef.current) io.observe(heroRef.current)
+    if (flowRef.current) io.observe(flowRef.current)
+    return () => io.disconnect()
+  }, [])
+  const showBar = !inView.hero && !inView.flow
+
+  // Steps open inline, so after each pick bring the newly opened one into view if it's off screen.
+  const activeRef = useRef<HTMLLIElement>(null)
+  const firstStep = useRef(true)
+  useEffect(() => {
+    if (firstStep.current) {
+      firstStep.current = false
+      return
+    }
+    const el = activeRef.current
+    if (!el) return
+    const top = el.getBoundingClientRect().top
+    if (top < 80 || top > window.innerHeight * 0.55) {
+      window.scrollTo({ top: window.scrollY + top - 88, behavior: 'smooth' })
+    }
+  }, [step])
+
   const today = todayIn(timezone)
   const staffFor = (sid: string) => staff.filter((s) => links.some((l) => l.staff_id === s.id && l.service_id === sid))
   const offering = staffFor(serviceId)
@@ -283,8 +309,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
   ].filter((g) => g.items.length > 0)
 
   const stepKeys: StepKey[] = askStaff ? ['service', 'staff', 'datetime', 'details'] : ['service', 'datetime', 'details']
-  const progressLabels = stepKeys.map((k) => STEP_LABELS[k])
-  const currentIndex = stepKeys.indexOf(step) + 1
+  const currentIndex = stepKeys.indexOf(step)
   const showServiceSearch = bookable.length > 6
   const filteredBookable = serviceQuery.trim()
     ? bookable.filter((s) => {
@@ -313,14 +338,11 @@ function Booker({ catalog }: { catalog: Catalog }) {
     setStep('details')
   }
 
-  function goBack() {
-    const idx = stepKeys.indexOf(step)
-    if (idx > 0) setStep(stepKeys[idx - 1])
-  }
-
+  // The step effect scrolls to the newly opened step; this covers re-picking without a step change.
   function pickService(id: string) {
+    const sameStep = step === (staffFor(id).length > 1 ? 'staff' : 'datetime')
     selectService(id)
-    document.getElementById('book-flow')?.scrollIntoView({ behavior: 'smooth' })
+    if (sameStep) document.getElementById('book-flow')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
@@ -365,28 +387,38 @@ function Booker({ catalog }: { catalog: Catalog }) {
     }
   }
 
-  // The same summary serves the desktop sidebar and the mobile review step above the CTA.
+  /** What a finished step collapses to, so the choices stay visible above the open step. */
+  function doneSummary(k: StepKey): string {
+    if (k === 'service' && service)
+      return [service.name, fmtDuration(service.duration_minutes), service.price !== null ? fmtPeso(service.price) : null].filter(Boolean).join(' · ')
+    if (k === 'staff') return chosenStaff ? chosenStaff.name : 'Any available'
+    if (k === 'datetime' && date && slot) return `${shortDate(date)} · ${fmtTime(slot, timezone)}`
+    return ''
+  }
+
+  // A ticket that fills in as the customer goes — sits beside the steps on large screens.
   const summaryCard = (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-5">
-      <h3 className="text-sm font-semibold text-slate-900">Booking summary</h3>
-      {!service ? (
-        <p className="mt-3 text-[13px] text-slate-500">Your selections will appear here as you go.</p>
-      ) : (
-        <>
-          <dl className="mt-4 space-y-3 border-t border-slate-200 pt-4">
-            <SummaryRow label="Service" value={service.name} />
-            {askStaff && <SummaryRow label="Staff" value={chosenStaff?.name ?? 'Any available'} sub={chosenStaff?.position ?? undefined} />}
-            <SummaryRow label="Date" value={date ? shortDate(date) : 'Not selected'} />
-            <SummaryRow label="Time" value={slot ? fmtTime(slot, timezone) : 'Not selected'} />
-            <SummaryRow label="Duration" value={fmtDuration(service.duration_minutes)} />
-          </dl>
-          {service.price !== null && (
-            <div className="mt-4 flex items-baseline justify-between border-t border-slate-200 pt-4">
-              <span className="text-[13px] font-medium text-slate-600">Price</span>
-              <span className="text-lg font-semibold text-slate-900">{fmtPeso(service.price)}</span>
-            </div>
-          )}
-        </>
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div style={accentSolid} className="px-5 py-4 text-white">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70">Your appointment</p>
+        <p className="font-display mt-1 truncate text-lg font-medium">{business.name}</p>
+      </div>
+      <dl className="space-y-3.5 px-5 py-5">
+        <SummaryRow icon={Sparkles} label="Service" value={service?.name ?? 'Not chosen yet'} sub={service ? fmtDuration(service.duration_minutes) : undefined} empty={!service} />
+        {askStaff && <SummaryRow icon={UserRound} label="With" value={chosenStaff?.name ?? 'Any available'} sub={chosenStaff?.position ?? undefined} />}
+        <SummaryRow icon={Calendar} label="Date" value={date ? shortDate(date) : 'Not chosen yet'} empty={!date} />
+        <SummaryRow icon={Clock} label="Time" value={slot ? fmtTime(slot, timezone) : 'Not chosen yet'} empty={!slot} />
+      </dl>
+      {service && service.price !== null && (
+        <div className="relative border-t border-dashed border-slate-200 px-5 py-4">
+          {/* Ticket notches */}
+          <span className="absolute -left-2.5 -top-2.5 h-5 w-5 rounded-full border border-slate-200 bg-white" />
+          <span className="absolute -right-2.5 -top-2.5 h-5 w-5 rounded-full border border-slate-200 bg-white" />
+          <div className="flex items-baseline justify-between">
+            <span className="text-sm text-slate-500">Total</span>
+            <span className="text-xl font-semibold text-slate-900">{fmtPeso(service.price)}</span>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -403,6 +435,12 @@ function Booker({ catalog }: { catalog: Catalog }) {
 
   return (
     <div className="font-site bg-white text-slate-900">
+      {!business.is_active && (
+        <div role="status" className="flex items-center justify-center gap-2 bg-amber-100 px-4 py-2.5 text-center text-sm font-medium text-amber-900">
+          <EyeOff size={15} aria-hidden="true" className="shrink-0" />
+          This page is hidden. Only you can see it — customers can't open it or book.
+        </div>
+      )}
       {/* Header */}
       <header
         className={`sticky top-0 z-20 border-b bg-white/80 backdrop-blur-md transition-shadow duration-300 ${
@@ -421,7 +459,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
           <a
             href="#book-flow"
             style={accentSolid}
-            className="shrink-0 rounded-full px-4 py-2 text-xs font-semibold text-white shadow-sm transition-all duration-200 hover:brightness-110 active:scale-[0.97] sm:px-5 sm:py-2.5 sm:text-sm"
+            className="hidden min-h-11 shrink-0 items-center rounded-full px-5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:brightness-110 active:scale-[0.97] lg:inline-flex"
           >
             Book Appointment
           </a>
@@ -429,7 +467,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
       </header>
 
       {/* Hero */}
-      <section className="relative isolate flex min-h-[24rem] items-center justify-center overflow-hidden bg-slate-900 px-4 py-16 text-center sm:min-h-[34rem] sm:py-24">
+      <section ref={heroRef} className="relative isolate flex min-h-[22rem] items-center justify-center overflow-hidden bg-slate-900 px-4 py-14 text-center sm:min-h-[34rem] sm:py-24">
         {business.cover_image_url && (
           <img src={business.cover_image_url} alt="" className="absolute inset-0 -z-10 h-full w-full scale-105 object-cover" />
         )}
@@ -438,7 +476,10 @@ function Booker({ catalog }: { catalog: Catalog }) {
           {business.category && (
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-white/75">{business.category}</p>
           )}
-          <h1 className="font-display text-4xl font-medium leading-[1.08] tracking-tight text-white sm:text-6xl">{business.name}</h1>
+          <h1 className="font-display text-4xl font-medium leading-[1.08] tracking-tight text-white wrap-break-word sm:text-6xl">{business.name}</h1>
+          {business.tagline && (
+            <p className="mx-auto max-w-xl text-lg font-medium text-white/95 sm:text-xl">{business.tagline}</p>
+          )}
           {business.description && (
             <p className="mx-auto max-w-xl text-base leading-relaxed text-white/80 sm:text-lg">{business.description}</p>
           )}
@@ -457,12 +498,12 @@ function Booker({ catalog }: { catalog: Catalog }) {
         <span id="services-anchor" className="block scroll-mt-16" />
         {/* Services */}
         {bookable.length > 0 && (
-          <section className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
-            <Reveal className="mx-auto mb-14 max-w-xl text-center">
+          <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-28">
+            <Reveal className="mx-auto mb-8 max-w-xl text-center sm:mb-14">
               <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Our Services</h2>
               <p className="mt-3 text-slate-500">Choose from what we offer and book in a few clicks.</p>
             </Reveal>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
               {bookable.map((s, i) => (
                 <Reveal key={s.id} delay={i * 60} className="h-full">
                   <div className="flex h-full flex-col justify-between overflow-hidden rounded-2xl border border-slate-200 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-slate-900/5">
@@ -483,7 +524,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
                     <div className="flex flex-1 flex-col justify-between p-6">
                       <div className="space-y-2">
                         <div className="flex items-start justify-between gap-3">
-                          <h3 className="text-lg font-semibold">{s.name}</h3>
+                          <h3 className="min-w-0 text-lg font-semibold wrap-break-word">{s.name}</h3>
                           {!s.image_url && s.price !== null && (
                             <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-900">
                               {fmtPeso(s.price)}
@@ -512,13 +553,13 @@ function Booker({ catalog }: { catalog: Catalog }) {
 
         {/* Team */}
         {staff.length > 0 && (
-          <section className="bg-slate-50 px-4 py-20 sm:px-6 sm:py-28">
+          <section className="bg-slate-50 px-4 py-14 sm:px-6 sm:py-28">
             <div className="mx-auto max-w-6xl">
-              <Reveal className="mx-auto mb-14 max-w-xl text-center">
+              <Reveal className="mx-auto mb-8 max-w-xl text-center sm:mb-14">
                 <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Meet Our Team</h2>
                 <p className="mt-3 text-slate-500">The people behind every appointment.</p>
               </Reveal>
-              <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-6 lg:grid-cols-4">
                 {staff.map((m, i) => (
                   <Reveal key={m.id} delay={i * 50}>
                     <div className="group flex flex-col items-center gap-3 rounded-2xl border border-slate-100 bg-white p-4 text-center shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl sm:gap-4 sm:p-6">
@@ -538,7 +579,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
                         )}
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900">{m.name}</p>
+                        <p className="font-semibold text-slate-900 wrap-break-word">{m.name}</p>
                         {m.position && (
                           <span
                             className="mt-2 inline-block rounded-full px-3 py-1 text-xs font-medium"
@@ -558,25 +599,38 @@ function Booker({ catalog }: { catalog: Catalog }) {
 
         {/* About */}
         {business.about && (
-          <Reveal as="div" className="mx-auto max-w-3xl px-4 py-20 text-center sm:px-6 sm:py-28">
-            <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">About {business.name}</h2>
-            <p className="mt-6 whitespace-pre-line text-lg leading-relaxed text-slate-600">{business.about}</p>
+          <Reveal as="div" className="mx-auto max-w-3xl px-4 py-14 text-center sm:px-6 sm:py-28">
+            <h2 className="font-display text-3xl font-medium tracking-tight wrap-break-word sm:text-4xl">About {business.name}</h2>
+            <p className="mt-5 whitespace-pre-line text-base leading-relaxed text-slate-600 sm:mt-6 sm:text-lg">{business.about}</p>
           </Reveal>
         )}
 
         {/* Contact + Hours */}
-        {(business.address || business.phone || business.email || Object.keys(workingHours).length > 0) && (
-          <section className="border-t border-slate-200 bg-slate-50 px-4 py-20 sm:px-6 sm:py-28">
+        {(hasContact || Object.keys(workingHours).length > 0) && (
+          <section className="border-t border-slate-200 bg-slate-50 px-4 py-14 sm:px-6 sm:py-28">
             <div className="mx-auto grid max-w-5xl gap-10 sm:grid-cols-2 sm:gap-16">
               <Reveal>
                 <h2 className="font-display text-2xl font-medium tracking-tight">Contact</h2>
                 <ul className="mt-6 space-y-4 text-sm text-slate-600">
-                  {business.address && (
+                  {address && (
                     <li className="flex items-start gap-3">
                       <span style={accentTint} className="grid h-9 w-9 shrink-0 place-items-center rounded-full">
                         <MapPin size={16} style={accentText} />
                       </span>
-                      <span className="pt-1.5">{business.address}</span>
+                      <span className="min-w-0 pt-1.5">
+                        <span className="block wrap-break-word">{address}</span>
+                        {directions && (
+                          <a
+                            href={directions}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 inline-flex items-center gap-1 font-semibold underline-offset-2 hover:underline"
+                            style={accentText}
+                          >
+                            Get directions <ArrowUpRight size={14} aria-hidden="true" />
+                          </a>
+                        )}
+                      </span>
                     </li>
                   )}
                   {business.phone && (
@@ -584,7 +638,9 @@ function Booker({ catalog }: { catalog: Catalog }) {
                       <span style={accentTint} className="grid h-9 w-9 shrink-0 place-items-center rounded-full">
                         <Phone size={16} style={accentText} />
                       </span>
-                      <span className="pt-1.5">{business.phone}</span>
+                      <a href={`tel:${business.phone.replace(/[^\d+]/g, '')}`} className="min-w-0 pt-1.5 wrap-anywhere underline-offset-2 hover:underline">
+                        {business.phone}
+                      </a>
                     </li>
                   )}
                   {business.email && (
@@ -592,10 +648,45 @@ function Booker({ catalog }: { catalog: Catalog }) {
                       <span style={accentTint} className="grid h-9 w-9 shrink-0 place-items-center rounded-full">
                         <Mail size={16} style={accentText} />
                       </span>
-                      <span className="pt-1.5">{business.email}</span>
+                      <a href={`mailto:${business.email}`} className="min-w-0 pt-1.5 wrap-anywhere underline-offset-2 hover:underline">
+                        {business.email}
+                      </a>
+                    </li>
+                  )}
+                  {business.website_url && (
+                    <li className="flex items-start gap-3">
+                      <span style={accentTint} className="grid h-9 w-9 shrink-0 place-items-center rounded-full">
+                        <Globe size={16} style={accentText} />
+                      </span>
+                      <a
+                        href={business.website_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-w-0 pt-1.5 wrap-anywhere underline-offset-2 hover:underline"
+                      >
+                        {displayUrl(business.website_url)}
+                      </a>
                     </li>
                   )}
                 </ul>
+                {socials.length > 0 && (
+                  <div className="mt-6 flex flex-wrap gap-2">
+                    {socials.map(([url, label, Icon]) => (
+                      <a
+                        key={label}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={`${business.name} on ${label}`}
+                        style={accentTint}
+                        className="grid h-11 w-11 place-items-center rounded-full transition-transform hover:scale-105"
+                      >
+                        <Icon size={18} style={accentText} />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {!hasContact && <p className="mt-6 text-sm text-slate-500">Book online below and we'll confirm your appointment.</p>}
               </Reveal>
               <Reveal delay={80}>
                 <h2 className="font-display text-2xl font-medium tracking-tight">Business Hours</h2>
@@ -631,33 +722,97 @@ function Booker({ catalog }: { catalog: Catalog }) {
           </section>
         )}
 
+        {/* Instructions and policies, read before booking rather than discovered after */}
+        {(business.booking_instructions || policies.length > 0) && (
+          <section id="good-to-know" className="mx-auto max-w-3xl scroll-mt-20 px-4 pt-14 sm:px-6 sm:pt-24">
+            <Reveal>
+              <h2 className="font-display text-center text-3xl font-medium tracking-tight sm:text-4xl">Good to know</h2>
+              <div className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+                {business.booking_instructions && (
+                  <p className="flex gap-3 p-5 text-[15px] leading-relaxed text-slate-700 sm:p-6" style={accentTintSoft}>
+                    <Info size={18} className="mt-0.5 shrink-0" style={accentText} aria-hidden="true" />
+                    <span className="whitespace-pre-line">{business.booking_instructions}</span>
+                  </p>
+                )}
+                {policies.map(([k, label]) => (
+                  <details key={k} className="group border-t border-slate-200 first:border-t-0">
+                    <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-5 py-4 text-[15px] font-semibold text-slate-900 hover:bg-slate-50 sm:px-6 [&::-webkit-details-marker]:hidden">
+                      {label}
+                      <ChevronDown size={18} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" aria-hidden="true" />
+                    </summary>
+                    <p className="whitespace-pre-line px-5 pb-5 text-sm leading-relaxed text-slate-600 sm:px-6">{business[k]}</p>
+                  </details>
+                ))}
+              </div>
+            </Reveal>
+          </section>
+        )}
+
         {/* Booking flow — one step at a time on the left, a running summary alongside it */}
-        <section id="book-flow" className="mx-auto max-w-5xl scroll-mt-16 px-4 py-20 sm:px-6 sm:py-28">
+        <section ref={flowRef} id="book-flow" className="mx-auto max-w-6xl scroll-mt-16 px-4 py-14 sm:px-6 sm:py-28">
           <Reveal className="mb-8 text-center sm:mb-10">
             <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Book an Appointment</h2>
             <p className="mt-3 text-slate-500">Pick a service, choose a time, and you're all set.</p>
           </Reveal>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start lg:gap-8">
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-7">
-              <StepProgress current={currentIndex} labels={progressLabels} accentStyle={accentSolid} />
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
+            <div className="rounded-3xl border border-slate-200 bg-white p-3.5 shadow-sm xs:p-4 sm:p-8">
+              <p className="mb-6 text-[13px] font-medium text-slate-500">
+                Step {currentIndex + 1} of {stepKeys.length}
+              </p>
 
-              <div key={step} className="animate-[reveal-up_0.3s_ease-out_forwards] space-y-4">
-                {step !== 'service' && (
-                  <button
-                    type="button"
-                    onClick={goBack}
-                    className="-ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10"
-                  >
-                    <ArrowLeft size={16} /> Back
-                  </button>
-                )}
+              {/* Every step stays on the page: finished ones fold into a one-line summary with "Change" */}
+              <ol>
+                {stepKeys.map((k, i) => {
+                  const state = i < currentIndex ? 'done' : i === currentIndex ? 'active' : 'upcoming'
+                  const last = i === stepKeys.length - 1
+                  return (
+                    <li
+                      key={k}
+                      ref={state === 'active' ? activeRef : undefined}
+                      aria-current={state === 'active' ? 'step' : undefined}
+                      className={`relative pl-11 sm:pl-14 ${last ? '' : 'pb-7'}`}
+                    >
+                      {!last && (
+                        <span
+                          aria-hidden="true"
+                          className={`absolute bottom-0 left-4 top-10 w-0.5 -translate-x-1/2 rounded-full bg-slate-200 transition-colors duration-500 sm:left-4.5 ${state === 'active' ? 'hidden sm:block' : ''}`}
+                          style={state === 'done' ? accentSolid : undefined}
+                        />
+                      )}
+                      <span
+                        aria-hidden="true"
+                        style={state === 'upcoming' ? undefined : state === 'done' ? accentSolid : { borderColor: accent, color: accent }}
+                        className={`absolute left-0 top-0 grid h-8 w-8 place-items-center rounded-full text-sm font-semibold transition-colors sm:h-9 sm:w-9 ${
+                          state === 'done' ? 'text-white' : state === 'active' ? 'border-2 bg-white' : 'border border-slate-200 bg-white text-slate-400'
+                        }`}
+                      >
+                        {state === 'done' ? <Check size={15} strokeWidth={3} /> : i + 1}
+                      </span>
 
-                <div>
-                  <h3 className="text-lg font-semibold tracking-tight text-slate-900">{STEP_TITLES[step]}</h3>
-                  <p className="mt-1 text-sm text-slate-500">{STEP_HINTS[step]}</p>
-                </div>
+                      <div className="flex min-h-8 items-center justify-between gap-3 sm:min-h-9">
+                        <div className="min-w-0">
+                          <h3 className={`font-semibold tracking-tight ${state === 'upcoming' ? 'text-slate-400' : 'text-slate-900'} ${state === 'active' ? 'text-lg' : 'text-[15px]'}`}>
+                            {STEP_TITLES[k]}
+                          </h3>
+                          {state === 'active' && <p className="mt-0.5 text-sm text-slate-500">{STEP_HINTS[k]}</p>}
+                          {state === 'done' && <p className="mt-0.5 truncate text-sm text-slate-600">{doneSummary(k)}</p>}
+                        </div>
+                        {state === 'done' && (
+                          <button
+                            type="button"
+                            onClick={() => setStep(k)}
+                            aria-label={`Change: ${STEP_TITLES[k].toLowerCase()}`}
+                            className="min-h-10 shrink-0 rounded-full px-3.5 text-sm font-semibold transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10"
+                            style={accentText}
+                          >
+                            Change
+                          </button>
+                        )}
+                      </div>
 
+                      {state === 'active' && (
+              <div key={k} className="@container -ml-11 mt-4 animate-[reveal-up_0.3s_ease-out_forwards] space-y-4 sm:ml-0">
                 {step === 'service' && (
                   <div className="space-y-3">
                     {bookable.length === 0 && <p className="text-sm text-slate-500">No services available right now.</p>}
@@ -676,7 +831,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
                     {bookable.length > 0 && filteredBookable.length === 0 ? (
                       <p className="text-sm text-slate-500">No services match "{serviceQuery}".</p>
                     ) : (
-                      <div className={`grid gap-2.5 sm:grid-cols-2 ${showServiceSearch ? 'max-h-112 overflow-y-auto pr-1' : ''}`}>
+                      <div className={`grid gap-2.5 ${showServiceSearch ? 'max-h-112 overflow-y-auto p-0.5 pr-1' : ''}`}>
                         {filteredBookable.map((s) => {
                           const on = serviceId === s.id
                           return (
@@ -684,23 +839,38 @@ function Booker({ catalog }: { catalog: Catalog }) {
                               key={s.id}
                               type="button"
                               aria-pressed={on}
-                              className={choice(on)}
+                              className={`${choice(on)} group flex items-center gap-3 p-3! pr-3! @md:gap-4 @md:p-3.5!`}
                               style={on ? { borderColor: accent } : undefined}
                               onClick={() => selectService(s.id)}
                             >
-                              {on && (
-                                <span style={accentSolid} className="absolute right-3 top-3 grid h-6 w-6 place-items-center rounded-full text-white">
-                                  <Check size={14} strokeWidth={3} />
+                              {s.image_url ? (
+                                <img src={s.image_url} alt="" className="h-14 w-14 shrink-0 rounded-xl object-cover @md:h-16 @md:w-16" />
+                              ) : (
+                                <span style={accentTint} className="grid h-14 w-14 shrink-0 place-items-center rounded-xl @md:h-16 @md:w-16">
+                                  <Sparkles size={20} style={accentText} />
                                 </span>
                               )}
-                              <span className="block font-semibold text-slate-900">{s.name}</span>
-                              <span className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-slate-600">
-                                <span className="inline-flex items-center gap-1">
-                                  <Clock size={13} className="text-slate-400" /> {fmtDuration(s.duration_minutes)}
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-semibold text-slate-900 wrap-break-word">{s.name}</span>
+                                {s.description && <span className="mt-0.5 line-clamp-2 block text-[13px] leading-relaxed text-slate-500">{s.description}</span>}
+                                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[13px] text-slate-500">
+                                  <span className="inline-flex items-center gap-1">
+                                    <Clock size={13} className="text-slate-400" /> {fmtDuration(s.duration_minutes)}
+                                  </span>
+                                  {/* Narrow rows: price joins the meta line instead of taking a column */}
+                                  {s.price !== null && <span className="font-semibold text-slate-900 @md:hidden">{fmtPeso(s.price)}</span>}
                                 </span>
-                                {s.price !== null && <span className="font-semibold text-slate-900">{fmtPeso(s.price)}</span>}
                               </span>
-                              {s.description && <span className="mt-1.5 line-clamp-2 block text-[13px] leading-relaxed text-slate-500">{s.description}</span>}
+                              <span className="flex shrink-0 items-center gap-2">
+                                {s.price !== null && <span className="hidden text-[15px] font-semibold text-slate-900 @md:inline">{fmtPeso(s.price)}</span>}
+                                {on ? (
+                                  <span style={accentSolid} className="grid h-6 w-6 place-items-center rounded-full text-white">
+                                    <Check size={14} strokeWidth={3} />
+                                  </span>
+                                ) : (
+                                  <ChevronRight size={18} className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-slate-500" />
+                                )}
+                              </span>
                             </button>
                           )
                         })}
@@ -710,7 +880,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
                 )}
 
                 {step === 'staff' && (
-                  <div className="grid gap-2.5 sm:grid-cols-2">
+                  <div className="grid gap-2.5 @lg:grid-cols-2">
                     {[{ id: '', name: 'Any available', position: 'First open time', avatar_url: null }, ...offering].map((s) => {
                       const on = staffId === s.id
                       return (
@@ -755,60 +925,71 @@ function Booker({ catalog }: { catalog: Catalog }) {
                       </p>
                     )}
 
-                    <DatePicker
-                      value={date}
-                      onSelect={(d) => { setDate(d); setSlot(''); setSlotTaken(false) }}
-                      today={today}
-                      maxDate={addDays(today, maxAdvanceDays)}
-                      workingHours={workingHours}
-                      accent={accent}
-                    />
+                    <div className="grid overflow-hidden rounded-2xl border border-slate-200 @xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+                      <div className="p-2.5 xs:p-3 @md:p-5">
+                        <DatePicker
+                          value={date}
+                          onSelect={(d) => { setDate(d); setSlot(''); setSlotTaken(false) }}
+                          today={today}
+                          maxDate={addDays(today, maxAdvanceDays)}
+                          workingHours={workingHours}
+                          accent={accent}
+                        />
+                      </div>
 
-                    <div>
-                      <h4 className="text-sm font-semibold text-slate-900">
-                        Available times{date && <span className="font-normal text-slate-500"> · {shortDate(date)}</span>}
-                      </h4>
-                      {!date ? (
-                        <p className="mt-2 text-sm text-slate-500">Select a date to see available times.</p>
-                      ) : slotsLoading ? (
-                        <p className="mt-2 text-sm text-slate-500">Loading times…</p>
-                      ) : (
-                        <>
-                          <ErrorText message={slotsError} />
-                          {!slotsError && times.length === 0 && (
-                            <p className="mt-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                              No times left on this date. Try another day on the calendar above.
-                            </p>
-                          )}
-                          <div className="mt-3 space-y-4">
-                            {timeGroups.map((g) => (
-                              <div key={g.label}>
-                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{g.label}</p>
-                                <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
-                                  {g.items.map((t) => {
-                                    const on = slot === t
-                                    return (
-                                      <button
-                                        key={t}
-                                        type="button"
-                                        aria-pressed={on}
-                                        style={on ? { backgroundColor: accent, borderColor: accent } : undefined}
-                                        className={`min-h-11 rounded-xl border px-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10 ${
-                                          on ? 'font-semibold text-white' : 'border-slate-200 font-medium text-slate-700 hover:border-slate-400 hover:bg-slate-50'
-                                        }`}
-                                        onClick={() => selectSlot(t)}
-                                      >
-                                        {fmtTime(t, timezone)}
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              </div>
-                            ))}
+                      <div className="border-t border-slate-200 bg-slate-50/70 p-3 @md:p-5 @xl:border-l @xl:border-t-0">
+                        <h4 className="text-sm font-semibold text-slate-900">{date ? shortDate(date) : 'Available times'}</h4>
+                        {!date ? (
+                          <div className="flex flex-col items-center px-4 py-6 text-center @xl:py-14">
+                            <span className="grid h-11 w-11 place-items-center rounded-full bg-white text-slate-400 shadow-sm">
+                              <CalendarDays size={18} />
+                            </span>
+                            <p className="mt-3 text-sm text-slate-500">Pick a day to see open times.</p>
                           </div>
-                          {times.length > 0 && <p className="mt-3 text-xs text-slate-500">Times shown in {timezone}.</p>}
-                        </>
-                      )}
+                        ) : slotsLoading ? (
+                          <div className="mt-3 grid grid-cols-3 gap-2 @md:grid-cols-4 @xl:grid-cols-2" aria-busy="true" aria-label="Loading times">
+                            {Array.from({ length: 6 }).map((_, i) => <span key={i} className="h-11 animate-pulse rounded-xl bg-slate-200/70" />)}
+                          </div>
+                        ) : (
+                          <>
+                            <ErrorText message={slotsError} />
+                            {!slotsError && times.length === 0 && (
+                              <p className="mt-3 rounded-xl bg-white p-4 text-sm text-slate-600 shadow-sm">
+                                Fully booked on this day. Try another date.
+                              </p>
+                            )}
+                            <div className="mt-3 space-y-4 @xl:max-h-88 @xl:overflow-y-auto @xl:p-0.5 @xl:pr-1.5">
+                              {timeGroups.map((g) => (
+                                <div key={g.label}>
+                                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                                    {g.label} <span className="font-normal normal-case tracking-normal">· {g.items.length} open</span>
+                                  </p>
+                                  <div className="mt-2 grid grid-cols-3 gap-2 @md:grid-cols-4 @xl:grid-cols-2">
+                                    {g.items.map((t) => {
+                                      const on = slot === t
+                                      return (
+                                        <button
+                                          key={t}
+                                          type="button"
+                                          aria-pressed={on}
+                                          style={on ? { backgroundColor: accent, borderColor: accent } : undefined}
+                                          className={`min-h-11 rounded-xl border px-2 text-sm transition-all focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/10 ${
+                                            on ? 'font-semibold text-white shadow-md' : 'border-slate-200 bg-white font-medium text-slate-700 hover:border-slate-400'
+                                          }`}
+                                          onClick={() => selectSlot(t)}
+                                        >
+                                          {fmtTime(t, timezone)}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {times.length > 0 && <p className="mt-3 text-xs text-slate-500">Times shown in {timezone}.</p>}
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -894,22 +1075,51 @@ function Booker({ catalog }: { catalog: Catalog }) {
                       />
                     </div>
 
-                    <div className="lg:hidden">{summaryCard}</div>
+                    {/* The ticket sits beside the steps on large screens; on small ones, just the total */}
+                    {service && service.price !== null && (
+                      <div className="flex items-baseline justify-between rounded-2xl bg-slate-50 px-4 py-3 lg:hidden">
+                        <span className="text-sm text-slate-600">Total · {fmtDuration(service.duration_minutes)}</span>
+                        <span className="text-lg font-semibold text-slate-900">{fmtPeso(service.price)}</span>
+                      </div>
+                    )}
+
+                    {business.booking_instructions && (
+                      <p className="flex gap-2.5 rounded-2xl p-4 text-[13px] leading-relaxed text-slate-700" style={accentTintSoft}>
+                        <Info size={16} className="mt-px shrink-0" style={accentText} aria-hidden="true" />
+                        <span className="whitespace-pre-line">{business.booking_instructions}</span>
+                      </p>
+                    )}
 
                     <ErrorText message={formError} />
 
                     <button
                       style={accentSolid}
-                      className="min-h-13 w-full rounded-full px-6 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/20 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex min-h-13 w-full items-center justify-center gap-2 rounded-full px-6 text-[15px] font-semibold text-white shadow-lg shadow-slate-900/10 transition-all duration-200 hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-slate-900/20 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={busy}
                       aria-busy={busy}
                     >
-                      {busy ? 'Confirming…' : 'Confirm Appointment'}
+                      {busy ? 'Confirming…' : <><Check size={18} strokeWidth={2.5} /> Confirm Appointment</>}
                     </button>
-                    <p className="text-center text-xs text-slate-500">You'll get a confirmation with all the details.</p>
+                    <p className="text-center text-xs text-slate-500">
+                      You'll get a confirmation with all the details.
+                      {policies.length > 0 && (
+                        <>
+                          {' '}By booking you agree to our{' '}
+                          <a href="#good-to-know" className="font-medium underline underline-offset-2" style={accentText}>
+                            booking policies
+                          </a>
+                          .
+                        </>
+                      )}
+                    </p>
                   </form>
                 )}
               </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ol>
             </div>
 
             <aside className="hidden lg:sticky lg:top-24 lg:block">{summaryCard}</aside>
@@ -917,7 +1127,7 @@ function Booker({ catalog }: { catalog: Catalog }) {
         </section>
 
         {/* Final CTA */}
-        <Reveal as="div" className="px-4 py-20 sm:px-6 sm:py-24" style={{ backgroundColor: accent } as React.CSSProperties}>
+        <Reveal as="div" className="px-4 py-14 sm:px-6 sm:py-24" style={{ backgroundColor: accent } as React.CSSProperties}>
           <div className="mx-auto max-w-2xl text-center text-white">
             <h2 className="font-display text-3xl font-medium tracking-tight sm:text-4xl">Ready to book?</h2>
             <p className="mt-3 text-white/85">Choose a service and schedule your appointment.</p>
@@ -933,12 +1143,12 @@ function Booker({ catalog }: { catalog: Catalog }) {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-200 px-4 py-10 sm:px-6">
+      <footer className="border-t border-slate-200 px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-10 sm:px-6 lg:pb-10">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
           <div>
-            <p className="font-display text-lg font-medium">{business.name}</p>
-            <p className="mt-1 text-sm text-slate-500">
-              {[business.address, business.phone, business.email].filter(Boolean).join(' · ')}
+            <p className="font-display text-lg font-medium wrap-break-word">{business.name}</p>
+            <p className="mt-1 text-sm text-slate-500 wrap-anywhere">
+              {[address, business.phone, business.email].filter(Boolean).join(' · ')}
             </p>
           </div>
           <a
@@ -953,6 +1163,61 @@ function Booker({ catalog }: { catalog: Catalog }) {
           © {new Date().getFullYear()} {business.name}. All rights reserved.
         </p>
       </footer>
+
+      <div
+        aria-hidden={!showBar}
+        inert={!showBar}
+        className={`fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md transition-transform duration-300 ease-out lg:hidden ${
+          showBar ? 'translate-y-0 shadow-[0_-8px_24px_rgba(15,23,42,0.08)]' : 'pointer-events-none translate-y-full'
+        }`}
+      >
+        {service ? (
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-slate-900">{service.name}</p>
+              <p className="truncate text-[13px] text-slate-500">
+                {date && slot ? `${shortDate(date)} · ${fmtTime(slot, timezone)}` : `Step ${currentIndex + 1} of ${stepKeys.length} · ${STEP_TITLES[step]}`}
+              </p>
+            </div>
+            <a
+              href="#book-flow"
+              style={accentSolid}
+              className="inline-flex min-h-12 shrink-0 items-center justify-center rounded-full px-6 text-[15px] font-semibold text-white shadow-sm active:scale-[0.98]"
+            >
+              Continue
+            </a>
+          </div>
+        ) : (
+          <a
+            href="#book-flow"
+            style={accentSolid}
+            className="flex min-h-12 w-full items-center justify-center gap-2 rounded-full px-6 text-[15px] font-semibold text-white shadow-sm active:scale-[0.99]"
+          >
+            <Calendar size={17} aria-hidden /> Book an appointment
+          </a>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Mirrors the storefront's top — bar, hero, first services — so the page does not jump on arrival. */
+function BookingPageSkeleton() {
+  return (
+    <div className="font-site animate-pulse bg-white" aria-busy="true" aria-label="Loading booking page">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-full bg-slate-200" />
+          <div className="h-4 w-32 rounded bg-slate-200" />
+        </div>
+        <div className="h-10 w-28 rounded-full bg-slate-200" />
+      </div>
+      <div className="h-[22rem] bg-slate-200 sm:h-[34rem]" />
+      <div className="mx-auto grid max-w-6xl gap-4 px-4 py-14 sm:grid-cols-2 sm:px-6 lg:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="h-40 rounded-2xl bg-slate-100" />
+        ))}
+      </div>
     </div>
   )
 }
@@ -960,32 +1225,36 @@ function Booker({ catalog }: { catalog: Catalog }) {
 export default function BookingPage() {
   const { slug = '' } = useParams()
   const load = useCallback(async (): Promise<Catalog | null> => {
-    const business = await unwrap<Business | null>(supabase.from('businesses').select('*').eq('slug', slug).maybeSingle())
+    // The visitor's view of the business: hidden contact details arrive blank, and a hidden page
+    // comes back only for its own members (0028).
+    const rows = await unwrap<PublicBusiness[]>(supabase.rpc('get_public_business', { p_slug: slug }))
+    const business = rows[0]
     if (!business) return null
-    const [settings, services, staff, links] = await Promise.all([
-      unwrap<{ timezone: string; max_advance_days: number; working_hours: WorkingHours }>(
-        supabase.from('business_settings').select('timezone, max_advance_days, working_hours').eq('business_id', business.id).single(),
-      ),
+    const [services, staff, links] = await Promise.all([
       unwrap<Service[]>(supabase.from('services').select('*').eq('business_id', business.id).eq('is_active', true).order('name')),
-      unwrap<PublicStaff[]>(supabase.from('staff').select('id, business_id, name, avatar_url, position, is_active').eq('business_id', business.id).eq('is_active', true).order('name')),
+      // Visitors cannot read the staff table (0026); this RPC returns only the public columns.
+      unwrap<PublicStaff[]>(supabase.rpc('get_public_staff', { p_business_id: business.id })),
       unwrap<{ staff_id: string; service_id: string }[]>(
         supabase.from('staff_services').select('staff_id, service_id').eq('business_id', business.id),
       ),
     ])
-    return {
-      business,
-      timezone: settings.timezone,
-      maxAdvanceDays: settings.max_advance_days,
-      workingHours: settings.working_hours,
-      services,
-      staff,
-      links,
-    }
+    return { business: { ...business, working_hours: business.working_hours ?? {} }, services, staff, links }
   }, [slug])
-  const { data, loading, error } = useLoad(load)
+  const { data, loading, error, reload } = useLoad(load)
 
-  if (loading) return <Loading />
-  if (error) return <ErrorText message={error} />
-  if (!data) return <p className="p-6 text-center text-slate-600">This booking page doesn't exist.</p>
+  if (loading) return <BookingPageSkeleton />
+  if (error)
+    return (
+      <main className="font-site grid min-h-dvh place-items-center bg-slate-50 px-4">
+        <ErrorState message={error} onRetry={reload} />
+      </main>
+    )
+  if (!data)
+    return (
+      <NotFoundPage
+        title="Booking page not found"
+        body="This link doesn't match any business on Appointly. Check the address, or ask the business for their booking link."
+      />
+    )
   return <Booker catalog={data} />
 }

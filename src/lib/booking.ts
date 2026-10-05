@@ -41,6 +41,16 @@ export async function createBooking(b: NewBooking) {
   return rows[0]
 }
 
+/**
+ * When the appointment itself ends. end_at also covers the service and business buffers (it is the
+ * range the booking blocks), so showing it as the end time made a 60-minute visit read as 75.
+ */
+export const appointmentEnd = (b: BookingRow): string =>
+  b.services ? new Date(new Date(b.start_at).getTime() + b.services.duration_minutes * 60_000).toISOString() : b.end_at
+
+/** Short public reference customers quote on the phone, e.g. "#A1B2C3D4". */
+export const bookingRef = (token: string) => `#${token.slice(0, 8).toUpperCase()}`
+
 /** Business members only (enforced by RLS). */
 export const setBookingStatus = (bookingId: string, status: BookingStatus) =>
   unwrap<null>(supabase.from('bookings').update({ status }).eq('id', bookingId))
@@ -66,3 +76,9 @@ export function fetchBookings(
   if (o.limit) q = q.limit(o.limit)
   return unwrap<BookingRow[]>(q)
 }
+
+/** One booking with its joins, or null if it's gone (or belongs to another business). */
+export const fetchBooking = (businessId: string, id: string) =>
+  unwrap<BookingRow | null>(
+    supabase.from('bookings').select(BOOKING_SELECT).eq('business_id', businessId).eq('id', id).maybeSingle(),
+  )

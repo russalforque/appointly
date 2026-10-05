@@ -16,6 +16,34 @@
   --color-brand-900: #312e81;
 }
 
+/* People paste URLs and long unbroken words into notes, descriptions and the About text. Breaking
+   only what would otherwise overflow keeps them inside their card instead of widening the page;
+   ordinary text wraps exactly as before. Truncated (nowrap) text is unaffected. */
+@layer base {
+  body {
+    overflow-wrap: break-word;
+  }
+}
+
+/* Height of the phone tab bar, so floating actions and toasts can sit above it. Zero wherever the
+   bar is not on screen (desktop, public pages, a locked dashboard). */
+:root {
+  --bottom-bar: 0px;
+}
+@media (max-width: 767px) {
+  :root:has([data-bottom-nav]) {
+    --bottom-bar: 4rem;
+  }
+}
+
+/* Clears the space a fixed bottom element covers: the tab bar, the home indicator, plus a gap. */
+@utility pb-bottom-bar {
+  padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom) + 1.5rem);
+}
+@utility bottom-above-bar {
+  bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom) + 1rem);
+}
+
 @utility no-scrollbar {
   scrollbar-width: none;
   &::-webkit-scrollbar {
@@ -63,4 +91,54 @@
 
 html:has(.font-site) {
   scroll-behavior: smooth;
+}
+
+/* iOS Safari zooms the page in when a focused field's text is under 16px, and does not zoom back
+   out. Phones get 16px fields everywhere; from sm up the utilities' own sizes apply again.
+   Unlayered on purpose, so it outranks the text-* utilities on the fields themselves. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.toast-in {
+  animation: toast-in 0.18s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-in {
+    animation: none;
+  }
+}
+
+/* Calendar: the thin bar shown while another date range loads. */
+@keyframes calendar-loading {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+.calendar-loading {
+  animation: calendar-loading 1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .calendar-loading {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
 }

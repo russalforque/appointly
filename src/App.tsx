@@ -27,12 +27,15 @@ import Terms from './pages/legal/Terms'
 import Privacy from './pages/legal/Privacy'
 import HomeRedirect from './components/HomeRedirect'
 import { Loading } from './components/Status'
+import ToastProvider from './components/ToastProvider'
+import ConfirmProvider from './components/ConfirmProvider'
 
-// Split out of the main bundle: recharts (DashboardHome) and react-big-calendar (CalendarPage)
-// are each larger than the rest of the app put together, and the admin area is only ever opened
+// Split out of the main bundle: recharts (DashboardHome) is larger than the rest of the app put
+// together, the calendar is only needed by signed-in owners, and the admin area is only ever opened
 // by Appointly staff. None of it belongs in the download a customer waits for on a booking page.
 const DashboardHome = lazy(() => import('./pages/dashboard/DashboardHome'))
 const CalendarPage = lazy(() => import('./pages/dashboard/CalendarPage'))
+const ReportsPage = lazy(() => import('./pages/dashboard/ReportsPage'))
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'))
 const AdminPaymentsPage = lazy(() => import('./pages/admin/AdminPaymentsPage'))
 const AdminBusinessesPage = lazy(() => import('./pages/admin/AdminBusinessesPage'))
@@ -42,46 +45,51 @@ const AdminAdminsPage = lazy(() => import('./pages/admin/AdminAdminsPage'))
 export default function App() {
   return (
     <AuthProvider>
-      <Suspense fallback={<Loading />}>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/confirm-email" element={<ConfirmEmail />} />
-          <Route path="/pricing" element={<Pricing />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/payment/success" element={<PaymentSuccess />} />
-          <Route path="/payment/cancelled" element={<PaymentCancelled />} />
-          <Route path="/book/:slug" element={<BookingPage />} />
-          <Route path="/booking/:token" element={<BookingConfirmation />} />
-          <Route path="/dashboard" element={<DashboardLayout />}>
-            <Route index element={<DashboardHome />} />
-            <Route path="calendar" element={<CalendarPage />} />
-            <Route path="bookings" element={<BookingsPage />} />
-            <Route path="customers" element={<CustomersPage />} />
-            <Route path="profile" element={<ProfilePage />} />
-            <Route path="hours" element={<HoursPage />} />
-            <Route path="booking-settings" element={<BookingSettingsPage />} />
-            <Route path="billing" element={<BillingPage />} />
-            <Route path="billing/pay/:planId" element={<PayPlanPage />} />
-            <Route path="services" element={<ServicesPage />} />
-            <Route path="staff" element={<StaffPage />} />
-            <Route path="staff/:id" element={<StaffDetailPage />} />
-          </Route>
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<Navigate to="/admin/payments" replace />} />
-            <Route path="payments" element={<AdminPaymentsPage />} />
-            <Route path="businesses" element={<AdminBusinessesPage />} />
-            <Route path="admins" element={<AdminAdminsPage />} />
-            <Route path="payment-settings" element={<AdminPaymentSettingsPage />} />
-          </Route>
-          {/* Staff have no dashboard, so "somewhere else" resolves per account. */}
-          <Route path="*" element={<HomeRedirect />} />
-        </Routes>
-      </Suspense>
+      <ToastProvider>
+        <ConfirmProvider>
+          <Suspense fallback={<Loading />}>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
+              <Route path="/confirm-email" element={<ConfirmEmail />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/payment/success" element={<PaymentSuccess />} />
+              <Route path="/payment/cancelled" element={<PaymentCancelled />} />
+              <Route path="/book/:slug" element={<BookingPage />} />
+              <Route path="/booking/:token" element={<BookingConfirmation />} />
+              <Route path="/dashboard" element={<DashboardLayout />}>
+                <Route index element={<DashboardHome />} />
+                <Route path="calendar" element={<CalendarPage />} />
+                <Route path="bookings" element={<BookingsPage />} />
+                <Route path="customers" element={<CustomersPage />} />
+                <Route path="reports" element={<ReportsPage />} />
+                <Route path="profile" element={<ProfilePage />} />
+                <Route path="hours" element={<HoursPage />} />
+                <Route path="booking-settings" element={<BookingSettingsPage />} />
+                <Route path="billing" element={<BillingPage />} />
+                <Route path="billing/pay/:planId" element={<PayPlanPage />} />
+                <Route path="services" element={<ServicesPage />} />
+                <Route path="staff" element={<StaffPage />} />
+                <Route path="staff/:id" element={<StaffDetailPage />} />
+              </Route>
+              <Route path="/admin" element={<AdminLayout />}>
+                <Route index element={<Navigate to="/admin/payments" replace />} />
+                <Route path="payments" element={<AdminPaymentsPage />} />
+                <Route path="businesses" element={<AdminBusinessesPage />} />
+                <Route path="admins" element={<AdminAdminsPage />} />
+                <Route path="payment-settings" element={<AdminPaymentSettingsPage />} />
+              </Route>
+              {/* Staff have no dashboard, so "somewhere else" resolves per account. */}
+              <Route path="*" element={<HomeRedirect />} />
+            </Routes>
+          </Suspense>
+        </ConfirmProvider>
+      </ToastProvider>
     </AuthProvider>
   )
 }

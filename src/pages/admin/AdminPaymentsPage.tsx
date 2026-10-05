@@ -87,7 +87,7 @@ function RejectDialog({
               key={p}
               type="button"
               onClick={() => setReason(p)}
-              className="rounded-full border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 outline-none transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
+              className="h-9 rounded-full border border-neutral-200 px-3 text-xs font-medium text-neutral-600 outline-none transition-colors hover:border-neutral-300 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-brand-600"
             >
               {p}
             </button>
@@ -346,16 +346,17 @@ export default function AdminPaymentsPage() {
         </div>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className={`${panel} hidden !p-0 md:block`}>
+          {/* Desktop table (lg+). Eight columns need ~1100px, so the reference and paid date
+              wait for xl; below lg the cards carry the same data. */}
+          <div className={`${panel} hidden overflow-hidden !p-0 lg:block`}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-100 text-left text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   <th className="px-4 py-3">Business</th>
                   <th className="px-4 py-3">Plan</th>
                   <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Customer reference</th>
-                  <th className="px-4 py-3">Paid</th>
+                  <th className="hidden px-4 py-3 xl:table-cell">Customer reference</th>
+                  <th className="hidden px-4 py-3 xl:table-cell">Paid</th>
                   <th className="px-4 py-3">Submitted</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Action</th>
@@ -364,18 +365,23 @@ export default function AdminPaymentsPage() {
               <tbody className="divide-y divide-neutral-100">
                 {payments.map((p) => (
                   <tr key={p.id} className="align-middle">
-                    <td className="max-w-48 px-4 py-3">
-                      <p className="truncate font-medium text-neutral-900">{p.business_name}</p>
-                      <p className="truncate text-xs text-neutral-500">{p.owner_email ?? '—'}</p>
+                    {/* max-w on a <td> is ignored by auto table layout, so the clamp sits on the content */}
+                    <td className="px-4 py-3">
+                      <p className="max-w-48 truncate font-medium text-neutral-900" title={p.business_name}>
+                        {p.business_name}
+                      </p>
+                      <p className="max-w-48 truncate text-xs text-neutral-500">{p.owner_email ?? '—'}</p>
                     </td>
                     <td className="px-4 py-3 text-neutral-700">{p.plan_name ?? p.plan_id}</td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium text-neutral-900">
                       {fmtMoney(p.amount_cents, p.currency)}
                     </td>
-                    <td className="max-w-40 truncate px-4 py-3 font-mono text-xs text-neutral-600">
-                      {p.customer_transaction_reference}
+                    <td className="hidden px-4 py-3 font-mono text-xs text-neutral-600 xl:table-cell">
+                      <span className="block max-w-40 truncate" title={p.customer_transaction_reference}>
+                        {p.customer_transaction_reference}
+                      </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-600">{fmtDate(p.payment_date)}</td>
+                    <td className="hidden whitespace-nowrap px-4 py-3 text-neutral-600 xl:table-cell">{fmtDate(p.payment_date)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-neutral-600">{fmtDate(p.submitted_at)}</td>
                     <td className="px-4 py-3">
                       <PaymentStatusPill status={p.status} />
@@ -391,8 +397,8 @@ export default function AdminPaymentsPage() {
             </table>
           </div>
 
-          {/* Mobile cards — the same rows without horizontal scrolling */}
-          <ul className="space-y-3 md:hidden">
+          {/* Mobile + tablet cards — the same rows without horizontal scrolling */}
+          <ul className="space-y-3 md:grid md:grid-cols-2 md:gap-3 md:space-y-0 lg:hidden">
             {payments.map((p) => (
               <li key={p.id}>
                 <button

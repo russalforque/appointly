@@ -36,6 +36,10 @@ export function friendlyError(msg: string): string {
     return 'That file is too large.'
   if (/mime type .* is not supported|invalid_mime_type/i.test(msg))
     return 'That file type is not allowed.'
+  // The size and URL limits from 0026 are named <table>_<column>_len / _web; say which rule tripped.
+  if (/violates check constraint "\w+_web"/i.test(msg)) return 'Image links must start with http:// or https://.'
+  if (/violates check constraint "\w+_len"/i.test(msg)) return 'One of the fields is empty or too long.'
+  if (/violates check constraint "\w+_max"/i.test(msg)) return 'One of the numbers is larger than allowed.'
   if (INTERNAL.some((re) => re.test(msg))) return 'Something went wrong. Please try again.'
   return msg
 }
