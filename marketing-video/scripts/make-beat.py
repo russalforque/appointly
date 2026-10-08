@@ -65,6 +65,31 @@ def bass(freq, length):
     return smooth * a * env(n, length * 0.6)
 
 
+def note(semitones_from_a4):
+    return 440.0 * 2 ** (semitones_from_a4 / 12)
+
+
+def pad(freqs, length):
+    """Soft detuned-saw chord with slow attack, low-passed by a moving average."""
+    n = int(SR * length)
+    t = np.arange(n) / SR
+    sig = np.zeros(n)
+    for f in freqs:
+        for detune in (-0.12, 0.12):
+            sig += 2 * ((t * f * (1 + detune / 100)) % 1) - 1
+    sig = np.convolve(sig, np.ones(60) / 60, mode="same") / (2 * len(freqs))
+    attack = np.minimum(1, t / 0.25)
+    release = np.minimum(1, (length - t) / 0.3)
+    return sig * attack * np.clip(release, 0, 1)
+
+
+def pluck(freq, length=0.25):
+    n = int(SR * length)
+    t = np.arange(n) / SR
+    sig = np.sin(2 * np.pi * freq * t) + 0.35 * np.sin(4 * np.pi * freq * t)
+    return sig * env(n, 0.07)
+
+
 def riser(length):
     n = int(SR * length)
     noise = rng.uniform(-1, 1, n)
@@ -77,8 +102,10 @@ def impact():
     return (np.sin(2 * np.pi * (40 + 60 * np.exp(-t * 8)) * t) + 0.3 * rng.uniform(-1, 1, n) * np.exp(-t * 12)) * env(n, 0.4)
 
 
-# Bars: A-minor-ish bass roots per bar (4 beats).
+# Bars: Am | Am | F | G, as bass roots and chord tones (semitones from A4).
 roots = [55.0, 55.0, 43.65, 49.0]
+CHORDS = [[-12, -9, -5], [-12, -9, -5], [-16, -12, -9], [-14, -10, -7]]
+ARP = [0, 1, 2, 1, 2, 0, 1, 2]  # chord-tone order for the 8th-note arpeggio
 beats = int(SECONDS / BEAT)
 DROP = DROPS[0]  # the first drop is where the bass comes in
 for b in range(beats):
@@ -98,6 +125,15 @@ for b in range(beats):
         root = roots[(b // 4) % 4]
         place(bass(root, BEAT * 0.45), t, 0.35)
         place(bass(root * 2, BEAT * 0.2), t + BEAT * 0.5, 0.2)
+
+# Pads from bar 1 (quiet under the hook), arpeggio once the first drop lands.
+bar = BEAT * 4
+for k in range(int(SECONDS / bar) + 1):
+    chord = CHORDS[k % 4]
+    place(pad([note(c) for c in chord], bar), k * bar, 0.16 if k * 4 >= DROP else 0.1)
+    if k * 4 >= DROP:
+        for j in range(8):
+            place(pluck(note(chord[ARP[j]] + 24)), k * bar + j * BEAT / 2, 0.07)
 
 for d in DROPS:
     place(riser(BEAT * 3), (d - 3) * BEAT, 0.25)

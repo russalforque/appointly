@@ -14,8 +14,14 @@ import { ShareScene } from "./ShareScene";
 import { SlamScene } from "./SlamScene";
 import { StepsScene } from "./StepsScene";
 import { ToastScene } from "./ToastScene";
+import voiceover from "./voiceover.json";
 
 type Scene = { name: string; beats: number; component: React.FC };
+
+type Line = { file: string; offset: number; durationInFrames: number };
+
+/** How far the music drops under the voice. */
+const DUCK = 0.7;
 
 type Cut = {
   scenes: Scene[];
@@ -23,12 +29,37 @@ type Cut = {
   audio: string;
   /** Frames to skip at the start of the audio, to line its drops up with the cut. */
   audioTrim?: number;
+  /** Voiceover lines by scene name, from scripts/make-voiceover.py. */
+  voiceover?: Record<string, Line>;
 };
 
 const framesOf = (scenes: Scene[]) => scenes.reduce((n, s) => n + s.beats * BEAT, 0);
 
-const Reel: React.FC<Cut> = ({ scenes, audio, audioTrim = 0 }) => {
+const Reel: React.FC<Cut> = ({ scenes, audio, audioTrim = 0, voiceover = {} }) => {
   const total = framesOf(scenes);
+  const starts = scenes.map((_, i) => framesOf(scenes.slice(0, i)));
+  const spans = scenes.flatMap((s, i) => {
+    const line = voiceover[s.name];
+    if (!line) return [];
+    const start = starts[i] + line.offset;
+    return [[start, start + line.durationInFrames]];
+  });
+  const musicVolume = (f: number) => {
+    const ducked = Math.max(
+      0,
+      ...spans.map(([a, b]) =>
+        interpolate(f, [a - 4, a, b, b + 8], [0, 1, 1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        }),
+      ),
+    );
+    const fadeOut = interpolate(f, [total - 20, total], [1, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+    });
+    return (1 - DUCK * ducked) * fadeOut;
+  };
   let from = 0;
   return (
     <AbsoluteFill style={{ background: "#000" }}>
@@ -38,18 +69,22 @@ const Reel: React.FC<Cut> = ({ scenes, audio, audioTrim = 0 }) => {
         return (
           <Sequence key={name} name={name} from={start} durationInFrames={beats * BEAT}>
             <Scene />
+            {voiceover[name] && (
+              <Sequence
+                name={`VO: ${name}`}
+                from={voiceover[name].offset}
+                durationInFrames={voiceover[name].durationInFrames}
+              >
+                <Html5Audio src={staticFile(voiceover[name].file)} />
+              </Sequence>
+            )}
           </Sequence>
         );
       })}
       <Html5Audio
         src={staticFile(audio)}
         trimBefore={audioTrim}
-        volume={(f) =>
-          interpolate(f, [total - 20, total], [1, 0], {
-            extrapolateLeft: "clamp",
-            extrapolateRight: "clamp",
-          })
-        }
+        volume={musicVolume}
       />
     </AbsoluteFill>
   );
@@ -76,6 +111,7 @@ export const CUTS = {
   // 19.5s
   AppointlyReel: {
     audio: "reel-beat.wav",
+    voiceover: voiceover.AppointlyReel,
     scenes: [
       { ...S.DMs, beats: 4 },
       { ...S.Slam, beats: 4 },
@@ -89,6 +125,7 @@ export const CUTS = {
   // 45s. Second drop (beat 52) lands on the calendar.
   AppointlyReel45: {
     audio: "reel-45-beat.wav",
+    voiceover: voiceover.AppointlyReel45,
     scenes: [
       { ...S.DMs, beats: 4 },
       { ...S.Slam, beats: 4 },
@@ -109,6 +146,7 @@ export const CUTS = {
   AppointlyAd10: {
     audio: "reel-beat.wav",
     audioTrim: 4 * BEAT,
+    voiceover: voiceover.AppointlyAd10,
     scenes: [
       { ...S.Slam, beats: 4 },
       { ...S.Logo, beats: 4 },

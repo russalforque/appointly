@@ -78,7 +78,13 @@ original 120 BPM track synthesized by `scripts/make-beat.py` (one beat = 15 fram
 ```bash
 npx remotion render AppointlyReel45 out/appointly-reel-45s.mp4
 
-# Regenerate the tracks (needs numpy)
+# Regenerate the music (needs numpy)
 python3 scripts/make-beat.py public/reel-beat.wav
 python3 scripts/make-beat.py public/reel-45-beat.wav 45 8,52 52
+
+# Regenerate the voiceover (Kokoro TTS, runs locally; see the script's docstring for setup).
+# Edit the lines in SCRIPT, run, then re-render.
+python3 scripts/make-voiceover.py <dir with kokoro-v1.0.int8.onnx + voices-v1.0.bin>
 ```
+
+The voice is Kokoro's `af_heart`. The music ducks under each voiceover line automatically.

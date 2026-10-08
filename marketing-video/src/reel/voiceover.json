@@ -1,0 +1,152 @@
+{
+  "AppointlyReel45": {
+    "DMs": {
+      "file": "vo/AppointlyReel45/DMs.wav",
+      "offset": 4,
+      "durationInFrames": 50,
+      "text": "Still taking bookings in your DMs?"
+    },
+    "Slam": {
+      "file": "vo/AppointlyReel45/Slam.wav",
+      "offset": 4,
+      "durationInFrames": 31,
+      "text": "Stop chasing them."
+    },
+    "Logo": {
+      "file": "vo/AppointlyReel45/Logo.wav",
+      "offset": 4,
+      "durationInFrames": 26,
+      "text": "Meet Appointly."
+    },
+    "Steps": {
+      "file": "vo/AppointlyReel45/Steps.wav",
+      "offset": 4,
+      "durationInFrames": 110,
+      "text": "Sign up free. Add your services and staff. Share your link. Get booked."
+    },
+    "Share": {
+      "file": "vo/AppointlyReel45/Share.wav",
+      "offset": 4,
+      "durationInFrames": 76,
+      "text": "One link, for your bio, your page, everywhere."
+    },
+    "Booking": {
+      "file": "vo/AppointlyReel45/Booking.wav",
+      "offset": 4,
+      "durationInFrames": 134,
+      "text": "Customers pick a service, a staff member, and a time that's actually free. Done."
+    },
+    "NoApp": {
+      "file": "vo/AppointlyReel45/NoApp.wav",
+      "offset": 4,
+      "durationInFrames": 75,
+      "text": "No app to download. It works on any phone."
+    },
+    "BeforeAfter": {
+      "file": "vo/AppointlyReel45/BeforeAfter.wav",
+      "offset": 4,
+      "durationInFrames": 109,
+      "text": "Ditch the notebook and the group chats. Run it all from one dashboard."
+    },
+    "Calendar": {
+      "file": "vo/AppointlyReel45/Calendar.wav",
+      "offset": 4,
+      "durationInFrames": 111,
+      "text": "One shared calendar for your whole team, so nothing gets double-booked."
+    },
+    "Toasts": {
+      "file": "vo/AppointlyReel45/Toasts.wav",
+      "offset": 4,
+      "durationInFrames": 71,
+      "text": "Bookings keep coming in, even while you sleep."
+    },
+    "Rules": {
+      "file": "vo/AppointlyReel45/Rules.wav",
+      "offset": 4,
+      "durationInFrames": 40,
+      "text": "Your hours. Your rules."
+    },
+    "Marquee": {
+      "file": "vo/AppointlyReel45/Marquee.wav",
+      "offset": 4,
+      "durationInFrames": 49,
+      "text": "Built for anyone who books time."
+    },
+    "CTA": {
+      "file": "vo/AppointlyReel45/CTA.wav",
+      "offset": 4,
+      "durationInFrames": 133,
+      "text": "Try Appointly free for fourteen days. No card required. Link in bio."
+    }
+  },
+  "AppointlyReel": {
+    "DMs": {
+      "file": "vo/AppointlyReel/DMs.wav",
+      "offset": 4,
+      "durationInFrames": 50,
+      "text": "Still taking bookings in your DMs?"
+    },
+    "Slam": {
+      "file": "vo/AppointlyReel/Slam.wav",
+      "offset": 4,
+      "durationInFrames": 31,
+      "text": "Stop chasing them."
+    },
+    "Logo": {
+      "file": "vo/AppointlyReel/Logo.wav",
+      "offset": 4,
+      "durationInFrames": 26,
+      "text": "Meet Appointly."
+    },
+    "Booking": {
+      "file": "vo/AppointlyReel/Booking.wav",
+      "offset": 4,
+      "durationInFrames": 104,
+      "text": "Customers book themselves, into times that are actually free."
+    },
+    "Toasts": {
+      "file": "vo/AppointlyReel/Toasts.wav",
+      "offset": 4,
+      "durationInFrames": 33,
+      "text": "Even while you sleep."
+    },
+    "Marquee": {
+      "file": "vo/AppointlyReel/Marquee.wav",
+      "offset": 4,
+      "durationInFrames": 49,
+      "text": "Built for anyone who books time."
+    },
+    "CTA": {
+      "file": "vo/AppointlyReel/CTA.wav",
+      "offset": 4,
+      "durationInFrames": 66,
+      "text": "Fourteen days free. Link in bio."
+    }
+  },
+  "AppointlyAd10": {
+    "Slam": {
+      "file": "vo/AppointlyAd10/Slam.wav",
+      "offset": 4,
+      "durationInFrames": 50,
+      "text": "Stop chasing bookings in your DMs."
+    },
+    "Logo": {
+      "file": "vo/AppointlyAd10/Logo.wav",
+      "offset": 4,
+      "durationInFrames": 26,
+      "text": "Meet Appointly."
+    },
+    "Booking": {
+      "file": "vo/AppointlyAd10/Booking.wav",
+      "offset": 4,
+      "durationInFrames": 57,
+      "text": "Customers book themselves, any time."
+    },
+    "CTA": {
+      "file": "vo/AppointlyAd10/CTA.wav",
+      "offset": 4,
+      "durationInFrames": 47,
+      "text": "Start free. Link in bio."
+    }
+  }
+}
