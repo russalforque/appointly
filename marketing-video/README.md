@@ -62,3 +62,14 @@ npm i
 npx remotion studio          # preview / edit
 npx remotion render AppointlyPromo out/appointly-promo.mp4
 ```
+
+## Appointly Reel
+
+`AppointlyReel` is a 19.5s, 1080×1920 (9:16) motion video for Instagram Reels / TikTok / Shorts
+(scenes in `src/reel/`). Every cut lands on a beat of `public/reel-beat.wav`, an original 120 BPM
+track synthesized by `scripts/make-beat.py` (one beat = 15 frames).
+
+```bash
+npx remotion render AppointlyReel out/appointly-reel.mp4
+python3 scripts/make-beat.py public/reel-beat.wav   # regenerate the beat (needs numpy)
+```
