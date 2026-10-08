@@ -1,6 +1,10 @@
 """Synthesizes the reel's soundtrack: 120 BPM (one beat = 15 frames at 30 fps).
 
-    python3 scripts/make-beat.py public/reel-beat.wav
+    python3 scripts/make-beat.py public/reel-beat.wav                 # 19.5s reel
+    python3 scripts/make-beat.py public/reel-45-beat.wav 45 8,52 52   # 45s reel
+
+Args: output path, length in seconds, beats that get a riser + impact ("drops"),
+and beats from which the clap switches to a double-time pattern ("lifts").
 """
 import sys
 import wave
@@ -10,7 +14,9 @@ import numpy as np
 SR = 44100
 BPM = 120
 BEAT = 60 / BPM
-SECONDS = 19.5
+SECONDS = float(sys.argv[2]) if len(sys.argv) > 2 else 19.5
+DROPS = [int(b) for b in sys.argv[3].split(",")] if len(sys.argv) > 3 else [8]
+LIFT = int(sys.argv[4]) if len(sys.argv) > 4 else 10**9
 N = int(SR * SECONDS)
 out = np.zeros(N)
 rng = np.random.default_rng(7)
@@ -74,15 +80,18 @@ def impact():
 # Bars: A-minor-ish bass roots per bar (4 beats).
 roots = [55.0, 55.0, 43.65, 49.0]
 beats = int(SECONDS / BEAT)
-DROP = 8  # beat where the logo lands (frame 120)
+DROP = DROPS[0]  # the first drop is where the bass comes in
 for b in range(beats):
     t = b * BEAT
     intro = b < 4
-    if b == DROP - 1:
-        continue  # a breath before the drop
+    if b + 1 in DROPS:
+        continue  # a breath before each drop
     place(kick(), t, 0.9 if not intro else 0.6)
     if b % 2 == 1 and not intro:
         place(clap(), t, 0.45)
+    if b >= LIFT:
+        place(clap(), t + BEAT * 0.75, 0.2)
+        place(hat(open_=True), t + BEAT * 0.5, 0.12)
     for k in range(2):
         place(hat(open_=(k == 1 and b % 4 == 3)), t + k * BEAT / 2, 0.18)
     if b >= DROP:
@@ -90,8 +99,9 @@ for b in range(beats):
         place(bass(root, BEAT * 0.45), t, 0.35)
         place(bass(root * 2, BEAT * 0.2), t + BEAT * 0.5, 0.2)
 
-place(riser(BEAT * 3), (DROP - 3) * BEAT, 0.25)
-place(impact(), DROP * BEAT, 0.8)
+for d in DROPS:
+    place(riser(BEAT * 3), (d - 3) * BEAT, 0.25)
+    place(impact(), d * BEAT, 0.8)
 
 # Fade out the last second.
 fade = int(SR * 1.0)
