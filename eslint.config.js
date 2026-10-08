@@ -8,7 +8,7 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   // supabase/functions is Deno, not browser TypeScript, and .kilo holds editor worktrees whose
   // copy of the project would otherwise be linted a second time.
-  globalIgnores(['dist', '.kilo', 'supabase/functions']),
+  globalIgnores(['dist', '.kilo', 'supabase/functions', 'marketing-video']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
